@@ -3,6 +3,8 @@ import {
   TextDisplayBuilder,
   SeparatorBuilder,
   SeparatorSpacingSize,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   MessageFlags,
 } from 'discord.js';
 
@@ -12,16 +14,21 @@ export const name = 'guildMemberAdd';
 export const once = false;
 
 export async function execute(member) {
+  console.log('[WELCOME] guildMemberAdd fired for:', member.user.tag);
+
   const channel = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
-  if (!channel) return;
+  if (!channel) {
+    console.log('[WELCOME] Channel not found:', WELCOME_CHANNEL_ID);
+    return;
+  }
 
   const memberCount = member.guild.memberCount;
 
   const container = new ContainerBuilder()
     .setAccentColor(0x1d72d7)
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `https://i.imgur.com/3uRwl64.png`
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL('https://i.imgur.com/3uRwl64.png')
       )
     )
     .addTextDisplayComponents(
