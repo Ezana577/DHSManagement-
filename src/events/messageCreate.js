@@ -10,9 +10,14 @@ if (message.author.bot) return;
 
 const prefix = getPrefix();
 
+console.log('Message:', message.content);
+console.log('Prefix:', JSON.stringify(prefix));
+console.log('Available commands:', [...prefixCommands.keys()]);
+
 if (message.content.startsWith(prefix)) {
 const args = message.content.slice(prefix.length).trim().split(/\s+/);
 const commandName = args.shift().toLowerCase();
+console.log('Typed command:', commandName);
 const command = prefixCommands.get(commandName);
 
 if (command) {
