@@ -1,4 +1,4 @@
-let currentPrefix = ‘!’;
+let currentPrefix = '!';
 
 export function getPrefix() {
 return currentPrefix;
