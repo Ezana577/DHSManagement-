@@ -6,9 +6,14 @@ export const name = 'messageCreate';
 export const once = false;
 
 export async function execute(message, prefixCommands) {
+  console.log('[EVENT] messageCreate triggered for:', message.author?.tag);
+
   if (message.author.bot) return;
 
   const prefix = getPrefix();
+  console.log(`[DEBUG] prefix = "${prefix}" (length ${prefix.length})`);
+  console.log(`[DEBUG] message.content = "${message.content}"`);
+  console.log(`[DEBUG] Starts with prefix? ${message.content.startsWith(prefix)}`);
 
   if (!message.content.startsWith(prefix)) {
     const isMentioned =
