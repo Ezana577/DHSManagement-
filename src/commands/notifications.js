@@ -55,6 +55,7 @@ export async function execute(interaction) {
   const channel = interaction.options.getChannel('channel');
 
   const container = new ContainerBuilder()
+    .setAccentColor(0x1d72d7)
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent('## DHS Notification Preferences')
     )
@@ -70,6 +71,9 @@ export async function execute(interaction) {
     .addSeparatorComponents(
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
     )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent('-# DHS System | Self Roles')
+    )
     .addActionRowComponents(
       new ActionRowBuilder().addComponents(
         PING_ROLES.map((r) =>
@@ -84,6 +88,7 @@ export async function execute(interaction) {
   await channel.send({
     components: [container],
     flags: MessageFlags.IsComponentsV2,
+    allowedMentions: { roles: [] },
   });
 
   await interaction.reply({ content: `Notification panel sent to ${channel}.`, flags: MessageFlags.Ephemeral });
