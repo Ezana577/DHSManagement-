@@ -1,7 +1,7 @@
 export const name = 'interactionCreate';
 export const once = false;
 
-export async function execute(interaction, commands, buttons) {
+export async function execute(interaction, commands, buttons, modals) {
 if (interaction.isChatInputCommand()) {
 const command = commands.get(interaction.commandName);
 if (!command) return;
@@ -21,13 +21,27 @@ return;
 }
 
 if (interaction.isButton()) {
-const handler = buttons.get(interaction.customId);
+const baseId = interaction.customId.split(':')[0];
+const handler = buttons.get(interaction.customId) ?? buttons.get(baseId);
 if (!handler) return;
 
 try {
   await handler(interaction);
 } catch (err) {
   console.error(`[Button Error] ${interaction.customId}:`, err);
+}
+return;
+}
+
+if (interaction.isModalSubmit()) {
+const baseId = interaction.customId.split(':')[0];
+const handler = modals.get(interaction.customId) ?? modals.get(baseId);
+if (!handler) return;
+
+try {
+  await handler(interaction);
+} catch (err) {
+  console.error(`[Modal Error] ${interaction.customId}:`, err);
 }
 }
 }
