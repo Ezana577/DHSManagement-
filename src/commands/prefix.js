@@ -33,7 +33,8 @@ const embed = new EmbedBuilder()
 .setColor(Style.color)
 .setTitle('Prefix Updated')
 .addFields(
-{ name: 'Previous Prefix', value: `\`${oldPrefix}``, inline: true }, { name: 'New Prefix', value: ``${newPrefix}``, inline: true }
+{ name: 'Previous Prefix', value: `\`${oldPrefix}\``, inline: true },
+{ name: 'New Prefix', value: `\`${newPrefix}\``, inline: true }
 )
 .setFooter(Style.footer('/prefix'));
 
