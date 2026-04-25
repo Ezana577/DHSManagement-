@@ -62,7 +62,6 @@ export async function execute(member) {
     );
 
   await channel.send({
-    content: `${member}`,
     components: [container],
     flags: MessageFlags.IsComponentsV2,
     allowedMentions: { users: [member.id] },
