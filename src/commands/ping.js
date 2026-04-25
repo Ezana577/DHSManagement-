@@ -1,68 +1,109 @@
-import { SlashCommandBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } from 'discord.js';
+import {
+SlashCommandBuilder,
+EmbedBuilder,
+ButtonBuilder,
+ButtonStyle,
+ActionRowBuilder,
+ModalBuilder,
+TextInputBuilder,
+TextInputStyle,
+} from 'discord.js';
+import { setPrefix, getPrefix } from '../utils/prefixStore.js';
 import { Style } from '../utils/style.js';
-import { isOnCooldown } from '../utils/cooldown.js';
 
-function buildEmbed(client, latency) {
-const embed = new EmbedBuilder()
-.setColor(Style.color)
-.setTitle('Network Status')
-.addFields(
-{ name: 'Websocket Latency', value: `${client.ws.ping}ms`, inline: true },
-{ name: 'Roundtrip Latency', value: `${latency}ms`, inline: true },
-{ name: 'API Status', value: 'Operational', inline: true }
-)
-.setFooter(Style.footer('/ping'));
+const ALLOWED_ROLES = [
+'1400533620610957493',
+'1496312707907977387',
+'1496619580188004415',
+];
 
-const row = new ActionRowBuilder().addComponents(
-new ButtonBuilder()
-.setCustomId('ping_refresh')
-.setLabel('Refresh')
-.setStyle(ButtonStyle.Primary)
-);
-
-return { embeds: [embed], components: [row] };
+function hasAllowedRole(member) {
+return ALLOWED_ROLES.some((id) => member.roles.cache.has(id));
 }
 
 export const data = new SlashCommandBuilder()
-.setName('ping')
-.setDescription('Displays current latency and network status.');
+.setName('prefix')
+.setDescription('View and change the bot prefix.');
 
 export async function execute(interaction) {
-const remaining = isOnCooldown(interaction.user.id, 'ping', 10000);
-
-if (remaining) {
-await interaction.reply({
-content: `This command is on cooldown. Please wait **${remaining}s**.`,
-ephemeral: true,
-});
+if (!hasAllowedRole(interaction.member)) {
+await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
 return;
 }
 
-const sent = await interaction.reply({ content: 'Measuring...', fetchReply: true });
-const latency = sent.createdTimestamp - interaction.createdTimestamp;
+const embed = new EmbedBuilder()
+.setColor(Style.color)
+.setTitle('Prefix Configuration')
+.setDescription('Greetings. The current prefix is')
+.addFields({ name: 'Bot Prefix', value: `\`\`\`${getPrefix()}\`\`\`` })
+.setFooter(Style.footer('/prefix'));
 
-await interaction.editReply(buildEmbed(interaction.client, latency));
+const row = new ActionRowBuilder().addComponents(
+new ButtonBuilder()
+.setCustomId(`prefix_change:${interaction.user.id}`)
+.setLabel('Change Prefix')
+.setStyle(ButtonStyle.Primary)
+);
+
+await interaction.reply({ embeds: [embed], components: [row] });
 
 setTimeout(() => {
 interaction.deleteReply().catch(() => null);
-}, 10000);
+}, 30000);
 }
 
 export const buttons = {
-ping_refresh: async (interaction) => {
-const remaining = isOnCooldown(interaction.user.id, 'ping_refresh', 5000);
+prefix_change: async (interaction) => {
+const [, ownerId] = interaction.customId.split(':');
 
-if (remaining) {
-  await interaction.reply({
-    content: `Please wait **${remaining}s** before refreshing again.`,
-    ephemeral: true,
-  });
+if (interaction.user.id !== ownerId) {
+  await interaction.reply({ content: 'Only the person who ran this command can use this button.', ephemeral: true });
   return;
 }
 
-await interaction.deferUpdate();
-const latency = Date.now() - interaction.createdTimestamp;
-await interaction.editReply(buildEmbed(interaction.client, latency));
+const modal = new ModalBuilder()
+  .setCustomId(`prefix_modal:${ownerId}`)
+  .setTitle('Change Prefix');
 
+const input = new TextInputBuilder()
+  .setCustomId('prefix_input')
+  .setLabel('New Prefix')
+  .setStyle(TextInputStyle.Short)
+  .setMinLength(1)
+  .setMaxLength(5)
+  .setPlaceholder('Enter a new prefix')
+  .setRequired(true);
+
+modal.addComponents(new ActionRowBuilder().addComponents(input));
+await interaction.showModal(modal);
+},
+};
+
+export const modals = {
+prefix_modal: async (interaction) => {
+if (!hasAllowedRole(interaction.member)) {
+await interaction.reply({ content: 'You do not have permission to change the prefix.', ephemeral: true });
+return;
+}
+
+const oldPrefix = getPrefix();
+const newPrefix = interaction.fields.getTextInputValue('prefix_input').trim();
+setPrefix(newPrefix);
+
+const embed = new EmbedBuilder()
+  .setColor(Style.color)
+  .setTitle('Prefix Updated')
+  .setDescription('Greetings. The prefix has been updated.')
+  .addFields(
+    { name: 'Previous Prefix', value: `\`\`\`${oldPrefix}\`\`\``, inline: true },
+    { name: 'New Prefix', value: `\`\`\`${newPrefix}\`\`\``, inline: true }
+  )
+  .setFooter(Style.footer('/prefix'));
+
+await interaction.reply({ embeds: [embed] });
+
+setTimeout(() => {
+  interaction.deleteReply().catch(() => null);
+}, 10000);
 },
 };
