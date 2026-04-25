@@ -45,6 +45,8 @@ for (const file of commandFiles) {
 
 const prefixCommandFiles = readdirSync(join(__dirname, 'prefixCommands')).filter((f) => f.endsWith('.js'));
 
+console.log('[DHS] prefixCommands folder contents:', prefixCommandFiles);
+
 for (const file of prefixCommandFiles) {
   try {
     const command = await import(`./prefixCommands/${file}`);
@@ -95,6 +97,16 @@ try {
   console.error('[DHS] Failed to register slash commands:', err);
 }
 
+const PORT = process.env.PORT || 3000;
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Bot is running');
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`[DHS] HTTP server listening on port ${PORT}`);
+});
+
 const eventFiles = readdirSync(join(__dirname, 'events')).filter((f) => f.endsWith('.js'));
 for (const file of eventFiles) {
   const event = await import(`./events/${file}`);
@@ -114,14 +126,5 @@ for (const file of eventFiles) {
     client.on(event.name, handler);
   }
 }
-
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Bot is running');
-});
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`[DHS] HTTP server listening on port ${PORT}`);
-});
 
 client.login(process.env.TOKEN);
