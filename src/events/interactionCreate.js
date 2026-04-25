@@ -1,4 +1,4 @@
-export const name = ‘interactionCreate’;
+export const name = 'interactionCreate';
 export const once = false;
 
 export async function execute(interaction, commands, buttons) {
@@ -6,7 +6,6 @@ if (interaction.isChatInputCommand()) {
 const command = commands.get(interaction.commandName);
 if (!command) return;
 
-```
 try {
   await command.execute(interaction);
 } catch (err) {
@@ -19,21 +18,16 @@ try {
   }
 }
 return;
-```
-
 }
 
 if (interaction.isButton()) {
 const handler = buttons.get(interaction.customId);
 if (!handler) return;
 
-```
 try {
   await handler(interaction);
 } catch (err) {
   console.error(`[Button Error] ${interaction.customId}:`, err);
 }
-```
-
 }
 }
