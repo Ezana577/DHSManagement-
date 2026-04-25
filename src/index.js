@@ -3,6 +3,7 @@ import { Client, GatewayIntentBits, Collection, REST, Routes } from 'discord.js'
 import { readdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
+import http from 'http';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -101,5 +102,14 @@ client.once(event.name, handler);
 client.on(event.name, handler);
 }
 }
+
+const server = http.createServer((req, res) => {
+res.writeHead(200, { 'Content-Type': 'text/plain' });
+res.end('Bot is running');
+});
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+console.log(`[DHS] HTTP server listening on port ${PORT}`);
+});
 
 client.login(process.env.TOKEN);
