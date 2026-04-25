@@ -1,12 +1,14 @@
 import {
   SlashCommandBuilder,
-  EmbedBuilder,
+  ContainerBuilder,
+  TextDisplayBuilder,
   ButtonBuilder,
   ButtonStyle,
   ActionRowBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
   MessageFlags,
 } from 'discord.js';
-import { Style } from '../utils/style.js';
 
 const ALLOWED_ROLE = '1496312707907977387';
 
@@ -52,28 +54,37 @@ export async function execute(interaction) {
 
   const channel = interaction.options.getChannel('channel');
 
-  const description = [
-    'Select which notifications you want to receive. Click again to remove.',
-    '',
-    ...PING_ROLES.map((r) => `<@&${r.id}>\n${r.description}`),
-  ].join('\n');
-
-  const embed = new EmbedBuilder()
-    .setColor(Style.color)
-    .setTitle('DHS Notification Preferences')
-    .setDescription(description)
-    .setFooter(Style.footer('notifications'));
-
-  const row = new ActionRowBuilder().addComponents(
-    PING_ROLES.map((r) =>
-      new ButtonBuilder()
-        .setCustomId(r.customId)
-        .setLabel(r.label)
-        .setStyle(ButtonStyle.Secondary)
+  const container = new ContainerBuilder()
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent('## DHS Notification Preferences')
     )
-  );
+    .addSeparatorComponents(
+      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        'Select which notifications you want to receive. Click again to remove.\n\n' +
+        PING_ROLES.map((r) => `<@&${r.id}>\n-# ${r.description}`).join('\n\n')
+      )
+    )
+    .addSeparatorComponents(
+      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+    )
+    .addActionRowComponents(
+      new ActionRowBuilder().addComponents(
+        PING_ROLES.map((r) =>
+          new ButtonBuilder()
+            .setCustomId(r.customId)
+            .setLabel(r.label)
+            .setStyle(ButtonStyle.Secondary)
+        )
+      )
+    );
 
-  await channel.send({ embeds: [embed], components: [row] });
+  await channel.send({
+    components: [container],
+    flags: MessageFlags.IsComponentsV2,
+  });
 
   await interaction.reply({ content: `Notification panel sent to ${channel}.`, flags: MessageFlags.Ephemeral });
 }
