@@ -13,6 +13,7 @@ export const name = 'deployment';
 
 const ALLOWED_ROLE = '1426608758133358592';
 const DEPLOYMENT_CHANNEL_ID = '1400527251748946031';
+const PING_ROLE_ID = '1447274909775691959';
 
 const REQUIREMENTS = [
   '• Maintain professionalism at all times',
@@ -107,6 +108,11 @@ export async function execute(message, args) {
           .setStyle(ButtonStyle.Danger)
       )
     );
+
+  await channel.send({
+    content: `<@&${PING_ROLE_ID}>`,
+    allowedMentions: { roles: [PING_ROLE_ID] },
+  });
 
   const sent = await channel.send({
     components: [container],
