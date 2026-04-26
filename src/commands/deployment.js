@@ -28,7 +28,6 @@ const REQUIREMENTS = [
   '• Respect all members of the community',
   '• Follow all server and department rules',
   '• Be active and responsive during the deployment',
-  '• Team coordination is expected at all times',
   '• Join the Main Server (PRPCS.)',
 ].join('\n');
 
@@ -43,7 +42,7 @@ function buildContainer(accentColor, statusLine, hostId, cohostId, note) {
   return new ContainerBuilder()
     .setAccentColor(accentColor)
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(statusLine)
+      new TextDisplayBuilder().setContent(`## ${statusLine}`)
     )
     .addSeparatorComponents(
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
@@ -69,16 +68,9 @@ function buildContainer(accentColor, statusLine, hostId, cohostId, note) {
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
     )
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`-# Failure to follow requirements may result in punishment.`)
-    )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-    )
-    .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`-# DHS System | Deployment`)
     );
 }
-
 function buildCustomId(hostId, cohostId, note) {
   const base = `deployment_end:${hostId}:${cohostId}:`;
   const maxNote = 100 - base.length;
