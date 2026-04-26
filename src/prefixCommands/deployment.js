@@ -20,7 +20,6 @@ const REQUIREMENTS = [
   '• Respect all members of the community',
   '• Follow all server and department rules',
   '• Be active and responsive during the deployment',
-  '• Team coordination is expected at all times',
   '• Join the Main Server (PRPCS.)',
 ].join('\n');
 
@@ -72,7 +71,7 @@ export async function execute(message, args) {
   const container = new ContainerBuilder()
     .setAccentColor(0x1d72d7)
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`A deployment has been started`)
+      new TextDisplayBuilder().setContent(`## A deployment has been started`)
     )
     .addSeparatorComponents(
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
@@ -93,12 +92,6 @@ export async function execute(message, args) {
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`**Important:**\n${IMPORTANT}`)
-    )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-    )
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`-# Failure to follow requirements may result in punishment.`)
     )
     .addSeparatorComponents(
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
