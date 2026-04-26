@@ -71,6 +71,7 @@ function buildContainer(accentColor, statusLine, hostId, cohostId, note) {
       new TextDisplayBuilder().setContent(`-# DHS System | Deployment`)
     );
 }
+
 function buildCustomId(hostId, cohostId, note) {
   const base = `deployment_end:${hostId}:${cohostId}:`;
   const maxNote = 100 - base.length;
@@ -129,7 +130,7 @@ export async function execute(interaction) {
 export const buttons = {
   deployment_end: async (interaction) => {
     const ended = interaction.message.components?.[0]?.components?.some(
-      (c) => c.type === 10 && c.content === 'The deployment has ended'
+      (c) => c.type === 10 && c.content === '## The deployment has ended'
     );
 
     if (ended) {
