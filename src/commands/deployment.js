@@ -8,12 +8,12 @@ import {
   ButtonStyle,
   ActionRowBuilder,
   MessageFlags,
-  ChannelType,
 } from 'discord.js';
 
 const ALLOWED_ROLE = '1426608758133358592';
 const DEPLOYMENT_CHANNEL_ID = '1400527251748946031';
 const LOG_CHANNEL_ID = '1441817740791910551';
+const PING_ROLE_ID = '1447274909775691959';
 
 const END_ALLOWED_ROLES = [
   '1400533620610957493',
@@ -117,6 +117,11 @@ export async function execute(interaction) {
         .setStyle(ButtonStyle.Danger)
     )
   );
+
+  await channel.send({
+    content: `<@&${PING_ROLE_ID}>`,
+    allowedMentions: { roles: [PING_ROLE_ID] },
+  });
 
   await channel.send({
     components: [container],
