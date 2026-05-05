@@ -10,6 +10,7 @@ export const name = 'training';
 
 const ALLOWED_ROLE = '1496636002650030230';
 const TRAINING_CHANNEL_ID = '1400629787554480148';
+const PING_ROLE_ID = '1400529105128001677';
 
 export async function execute(message, args) {
   if (message.channelId !== TRAINING_CHANNEL_ID) return;
@@ -47,7 +48,7 @@ export async function execute(message, args) {
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
         `A training is being hosted! Join now.\n**Instructions:**\n\n` +
-        `• Join the Training server, Code: SWPC\n` +
+        `• Join the Training Server, Code: SWPC\n` +
         `• You must be professional\n` +
         `• Join the DHS Police team\n` +
         `• Wear DHS Uniform polo\n` +
@@ -74,15 +75,11 @@ export async function execute(message, args) {
       new TextDisplayBuilder().setContent(`-# DHS System | Training`)
     );
 
-  const mentionContent = cohostId
-    ? `<@${hostId}> <@${cohostId}>`
-    : `<@${hostId}>`;
-
   message.delete().catch(() => null);
 
   await message.channel.send({
-    content: mentionContent,
-    allowedMentions: { users: cohostId ? [hostId, cohostId] : [hostId] },
+    content: `<@&${PING_ROLE_ID}>`,
+    allowedMentions: { roles: [PING_ROLE_ID] },
   });
 
   const sent = await message.channel.send({
