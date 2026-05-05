@@ -51,7 +51,7 @@ export async function execute(interaction) {
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
         `A training is being hosted! Join now.\n**Instructions:**\n\n` +
-        `• Join the Training Main, Code: SWPC\n` +
+        `• Join the Training server, Code: SWPC\n` +
         `• You must be professional\n` +
         `• Join the DHS Police team\n` +
         `• Wear DHS Uniform polo\n` +
