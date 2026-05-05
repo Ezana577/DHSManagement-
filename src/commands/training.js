@@ -9,6 +9,7 @@ import {
 
 const ALLOWED_ROLE = '1496636002650030230';
 const TRAINING_CHANNEL_ID = '1400629787554480148';
+const PING_ROLE_ID = '1400529105128001677';
 
 export const data = new SlashCommandBuilder()
   .setName('training')
@@ -51,7 +52,7 @@ export async function execute(interaction) {
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
         `A training is being hosted! Join now.\n**Instructions:**\n\n` +
-        `• Join the Training server, Code: SWPC\n` +
+        `• Join the Training Server, Code: SWPC\n` +
         `• You must be professional\n` +
         `• Join the DHS Police team\n` +
         `• Wear DHS Uniform polo\n` +
@@ -78,15 +79,11 @@ export async function execute(interaction) {
       new TextDisplayBuilder().setContent(`-# DHS System | Training`)
     );
 
-  const mentionContent = cohostId
-    ? `<@${hostId}> <@${cohostId}>`
-    : `<@${hostId}>`;
-
   await interaction.reply({ content: 'Training posted.', flags: MessageFlags.Ephemeral });
 
   await interaction.channel.send({
-    content: mentionContent,
-    allowedMentions: { users: cohostId ? [hostId, cohostId] : [hostId] },
+    content: `<@&${PING_ROLE_ID}>`,
+    allowedMentions: { roles: [PING_ROLE_ID] },
   });
 
   await interaction.channel.send({
