@@ -14,15 +14,6 @@ export async function execute(message, args) {
     return;
   }
 
-  const target = message.mentions.users.first();
-
-  if (!target) {
-    const reply = await message.reply({ content: 'You must mention the user requesting a training.' });
-    setTimeout(() => reply.delete().catch(() => null), 5000);
-    message.delete().catch(() => null);
-    return;
-  }
-
   message.delete().catch(() => null);
 
   await message.channel.send({
@@ -31,7 +22,7 @@ export async function execute(message, args) {
   });
 
   await message.channel.send({
-    content: `<@${target.id}> is requesting a training at this time. Please train them if you are available.`,
-    allowedMentions: { users: [target.id] },
+    content: `<@${message.author.id}> is requesting a training at this time. Please train them if you are available.`,
+    allowedMentions: { users: [message.author.id] },
   });
 }
