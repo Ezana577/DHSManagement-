@@ -1,23 +1,21 @@
 import { EmbedBuilder } from 'discord.js';
 
-const ALLOWED_USERS = ['1400533620610957493', '1496619580188004415', '1496312707907977387'];
+const ALLOWED_ROLES = ['1400533620610957493', '1496619580188004415', '1496312707907977387'];
 const LOG_CHANNEL_ID = '1400610140406808768';
 
 export const name = 'say';
 
 export async function execute(message, args) {
-  if (!ALLOWED_USERS.includes(message.author.id)) {
-    await message.delete().catch(() => null);
-    return;
-  }
-
-  const content = args.join(' ');
-  if (!content) {
-    await message.delete().catch(() => null);
-    return;
-  }
+  const member = message.member;
+  const hasRole = ALLOWED_ROLES.some((id) => member.roles.cache.has(id));
 
   await message.delete().catch(() => null);
+
+  if (!hasRole) return;
+
+  const content = args.join(' ');
+  if (!content) return;
+
   const sent = await message.channel.send(content);
 
   const logChannel = await message.client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
