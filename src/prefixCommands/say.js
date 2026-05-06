@@ -6,10 +6,16 @@ const LOG_CHANNEL_ID = '1400610140406808768';
 export const name = 'say';
 
 export async function execute(message, args) {
-  if (!ALLOWED_USERS.includes(message.author.id)) return;
+  if (!ALLOWED_USERS.includes(message.author.id)) {
+    await message.delete().catch(() => null);
+    return;
+  }
 
   const content = args.join(' ');
-  if (!content) return;
+  if (!content) {
+    await message.delete().catch(() => null);
+    return;
+  }
 
   await message.delete().catch(() => null);
   const sent = await message.channel.send(content);
@@ -18,7 +24,7 @@ export async function execute(message, args) {
   if (!logChannel) return sent;
 
   const embed = new EmbedBuilder()
-    .setTitle('!say Used')
+    .setTitle('📢 !say Used')
     .setColor(0x5865f2)
     .addFields(
       { name: 'Executor', value: `<@${message.author.id}> (${message.author.tag} — \`${message.author.id}\`)`, inline: false },
