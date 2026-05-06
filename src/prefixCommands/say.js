@@ -24,7 +24,7 @@ export async function execute(message, args) {
   if (!logChannel) return sent;
 
   const embed = new EmbedBuilder()
-    .setTitle('📢 !say Used')
+    .setTitle('!say Used')
     .setColor(0x5865f2)
     .addFields(
       { name: 'Executor', value: `<@${message.author.id}> (${message.author.tag} — \`${message.author.id}\`)`, inline: false },
