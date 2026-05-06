@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 
 const ALLOWED_USERS = ['1400533620610957493', '1496619580188004415', '1496312707907977387'];
 const LOG_CHANNEL_ID = '1400610140406808768';
@@ -8,17 +8,16 @@ export const data = new SlashCommandBuilder()
   .setDescription('Send a message as the bot.')
   .addStringOption((option) =>
     option.setName('message').setDescription('The message to send.').setRequired(true)
-  )
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+  );
 
 export async function execute(interaction) {
   if (!ALLOWED_USERS.includes(interaction.user.id)) {
-    return interaction.reply({ content: 'You are not authorized to use this command.', ephemeral: true });
+    return interaction.reply({ content: 'You are not authorized to use this command.', flags: MessageFlags.Ephemeral });
   }
 
   const message = interaction.options.getString('message');
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await interaction.channel.send(message);
   await interaction.deleteReply();
 
