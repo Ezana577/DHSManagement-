@@ -390,30 +390,64 @@ async function runDmFlow(user, rankId, onComplete) {
         const questionId = i.values[0];
         const q = questions.find((q) => q.id === questionId);
 
-        await i.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(GOLD)
-              .setAuthor({ name: 'DHS Application System' })
-              .setTitle('Edit Response')
-              .setDescription(`**${q.prompt}**\n\nType your new answer below.`)
-              .setFooter(FOOTER),
-          ],
-        });
+        const editEmbed = new EmbedBuilder()
+          .setColor(GOLD)
+          .setAuthor({ name: 'DHS Application System' })
+          .setTitle('Edit Response')
+          .setDescription(`**${q.prompt}**\n\n${q.type === 'choice' ? 'Select your new answer below.' : 'Type your new answer below.'}`)
+          .setFooter(FOOTER);
 
-        try {
-          const collected = await dm.awaitMessages({
-            filter: (m) => m.author.id === user.id,
-            max: 1, time: 300_000, errors: ['time'],
-          });
-          const existing = sessionAnswers.find((a) => a.questionId === questionId);
-          if (existing) existing.value = collected.first().content.trim();
-          await summaryMsg.edit({
-            embeds: buildSummaryEmbeds(questions, sessionAnswers),
-            components: buildSummaryComponents(questions, currentPage),
-          });
-        } catch {
-          await dm.send({ embeds: [errEmbed('Edit timed out. Your previous answer was kept.')] }).catch(() => null);
+        if (q.type === 'choice') {
+          // Show the question with its choice buttons.
+          const choiceRow = new ActionRowBuilder().addComponents(
+            q.choices.slice(0, 5).map((label, idx) =>
+              new ButtonBuilder().setCustomId(`dmedit:${idx}`).setLabel(label).setStyle(ButtonStyle.Secondary)
+            )
+          );
+          await i.update({ embeds: [editEmbed], components: [choiceRow] });
+
+          try {
+            const btn = await summaryMsg.awaitMessageComponent({
+              filter: (b) => b.user.id === user.id && b.customId.startsWith('dmedit:'),
+              componentType: ComponentType.Button,
+              time: 300_000,
+            });
+            const idx = parseInt(btn.customId.split(':')[1]);
+            const existing = sessionAnswers.find((a) => a.questionId === questionId);
+            if (existing) existing.value = q.choices[idx];
+            await btn.update({
+              embeds: buildSummaryEmbeds(questions, sessionAnswers),
+              components: buildSummaryComponents(questions, currentPage),
+            });
+          } catch {
+            await summaryMsg.edit({
+              embeds: buildSummaryEmbeds(questions, sessionAnswers),
+              components: buildSummaryComponents(questions, currentPage),
+            }).catch(() => null);
+          }
+
+        } else {
+          // Text question — update the summary message to show the edit prompt,
+          // then wait for the user to type their answer in the DM.
+          await i.update({ embeds: [editEmbed], components: [] });
+
+          try {
+            const collected = await dm.awaitMessages({
+              filter: (m) => m.author.id === user.id,
+              max: 1, time: 300_000, errors: ['time'],
+            });
+            const existing = sessionAnswers.find((a) => a.questionId === questionId);
+            if (existing) existing.value = collected.first().content.trim();
+            await summaryMsg.edit({
+              embeds: buildSummaryEmbeds(questions, sessionAnswers),
+              components: buildSummaryComponents(questions, currentPage),
+            });
+          } catch {
+            await summaryMsg.edit({
+              embeds: buildSummaryEmbeds(questions, sessionAnswers),
+              components: buildSummaryComponents(questions, currentPage),
+            }).catch(() => null);
+          }
         }
         return;
       }
@@ -622,7 +656,8 @@ export const buttons = {
 
     const questions = rankQuestions[app.rankId] ?? [];
 
-    const reviewEmbed = new EmbedBuilder()
+    // Build header embed (4 fields: Applicant, Rank, Submitted, Status)
+    const headerEmbed = new EmbedBuilder()
       .setColor(DARK)
       .setAuthor({ name: 'Application Review' })
       .setTitle(`Review — ${app.username}`)
@@ -637,12 +672,25 @@ export const buttons = {
       .setTimestamp()
       .setFooter(FOOTER);
 
+    // Split Q&A across embeds — Discord caps at 25 fields per embed.
+    // Header already uses 4, so first answer chunk gets 21 slots; rest get 25.
+    const reviewEmbeds = [headerEmbed];
+    const FIRST_CHUNK = 21;
+    const REST_CHUNK  = 25;
+    let chunkLimit = FIRST_CHUNK;
+    let current = headerEmbed;
+
     for (const q of questions) {
       const ans = app.answers.find((a) => a.questionId === q.id);
-      reviewEmbed.addFields({ name: q.prompt.slice(0, 256), value: (ans?.value ?? '_No response_').slice(0, 1024), inline: false });
+      if (current.data.fields && current.data.fields.length >= chunkLimit) {
+        current = new EmbedBuilder().setColor(DARK).setAuthor({ name: 'Application Review (continued)' }).setFooter(FOOTER);
+        reviewEmbeds.push(current);
+        chunkLimit = REST_CHUNK;
+      }
+      current.addFields({ name: q.prompt.slice(0, 256), value: (ans?.value ?? '_No response_').slice(0, 1024), inline: false });
     }
 
-    return interaction.reply({ embeds: [reviewEmbed], flags: MessageFlags.Ephemeral });
+    return interaction.reply({ embeds: reviewEmbeds, flags: MessageFlags.Ephemeral });
   },
 
   appaccept: async (interaction) => {
