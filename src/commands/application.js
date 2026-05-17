@@ -317,16 +317,29 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction) {
     if (!interaction.member.roles.cache.has(DASHBOARD_ROLE)) {
-        return interaction.reply({ embeds: [embed(RED, 'You do not have permission to use this command.')], flags: MessageFlags.Ephemeral });
+        return interaction.reply({ 
+            embeds: [embed(RED, 'You do not have permission to use this command.')], 
+            flags: MessageFlags.Ephemeral 
+        });
+    }
+
+    // Defer the reply to give us time to process
+    await interaction.deferReply();
+    
+    // Delete the original command message to hide who sent it
+    try {
+        await interaction.deleteReply();
+    } catch (err) {
+        // If we can't delete, that's fine
     }
 
     const dashboardEmbed = createDashboardEmbed();
     const selectMenu = createRankSelectMenu();
     
     if (selectMenu) {
-        await interaction.reply({ embeds: [dashboardEmbed], components: [selectMenu] });
+        await interaction.channel.send({ embeds: [dashboardEmbed], components: [selectMenu] });
     } else {
-        await interaction.reply({ embeds: [dashboardEmbed] });
+        await interaction.channel.send({ embeds: [dashboardEmbed] });
     }
 }
 
@@ -336,7 +349,10 @@ export const managementData = new SlashCommandBuilder()
 
 export async function managementExecute(interaction) {
     if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
-        return interaction.reply({ embeds: [embed(RED, 'You do not have permission to use this command.')], flags: MessageFlags.Ephemeral });
+        return interaction.reply({ 
+            embeds: [embed(RED, 'You do not have permission to use this command.')], 
+            flags: MessageFlags.Ephemeral 
+        });
     }
 
     const selectMenu = new ActionRowBuilder().addComponents(
@@ -391,12 +407,18 @@ export const buttons = {
         const rankName = rankNames[rankId];
 
         if (getPendingApp(interaction.user.id, rankId)) {
-            return interaction.reply({ embeds: [embed(RED, 'You already have a pending application for this rank.')], flags: MessageFlags.Ephemeral });
+            return interaction.reply({ 
+                embeds: [embed(RED, 'You already have a pending application for this rank.')], 
+                flags: MessageFlags.Ephemeral 
+            });
         }
 
         const entry = db.data.enabledRanks.find((r) => r.id === rankId && r.enabled);
         if (!entry) {
-            return interaction.reply({ embeds: [embed(RED, 'This rank is no longer available for application.')], flags: MessageFlags.Ephemeral });
+            return interaction.reply({ 
+                embeds: [embed(RED, 'This rank is no longer available for application.')], 
+                flags: MessageFlags.Ephemeral 
+            });
         }
 
         await interaction.reply({
@@ -428,18 +450,27 @@ export const buttons = {
         });
 
         if (!result.success && result.reason === 'dm_failed') {
-            await interaction.followUp({ embeds: [embed(RED, 'Unable to DM you. Please open your DMs and try again.')], flags: MessageFlags.Ephemeral });
+            await interaction.followUp({ 
+                embeds: [embed(RED, 'Unable to DM you. Please open your DMs and try again.')], 
+                flags: MessageFlags.Ephemeral 
+            });
         }
     },
 
     appreview: async (interaction) => {
         if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
-            return interaction.reply({ embeds: [embed(RED, 'You do not have permission to review applications.')], flags: MessageFlags.Ephemeral });
+            return interaction.reply({ 
+                embeds: [embed(RED, 'You do not have permission to review applications.')], 
+                flags: MessageFlags.Ephemeral 
+            });
         }
 
         const appId = interaction.customId.split(':')[1];
         const app = getAppById(appId);
-        if (!app) return interaction.reply({ embeds: [embed(RED, 'Application not found.')], flags: MessageFlags.Ephemeral });
+        if (!app) return interaction.reply({ 
+            embeds: [embed(RED, 'Application not found.')], 
+            flags: MessageFlags.Ephemeral 
+        });
 
         const questions = rankQuestions[app.rankId] ?? [];
 
@@ -468,15 +499,24 @@ export const buttons = {
 
     appaccept: async (interaction) => {
         if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
-            return interaction.reply({ embeds: [embed(RED, 'You do not have permission to accept applications.')], flags: MessageFlags.Ephemeral });
+            return interaction.reply({ 
+                embeds: [embed(RED, 'You do not have permission to accept applications.')], 
+                flags: MessageFlags.Ephemeral 
+            });
         }
 
         const appId = interaction.customId.split(':')[1];
         const app = getAppById(appId);
-        if (!app) return interaction.reply({ embeds: [embed(RED, 'Application not found.')], flags: MessageFlags.Ephemeral });
+        if (!app) return interaction.reply({ 
+            embeds: [embed(RED, 'Application not found.')], 
+            flags: MessageFlags.Ephemeral 
+        });
 
         if (app.status !== 'pending') {
-            return interaction.reply({ embeds: [embed(RED, `This application has already been ${app.status}.`)], flags: MessageFlags.Ephemeral });
+            return interaction.reply({ 
+                embeds: [embed(RED, `This application has already been ${app.status}.`)], 
+                flags: MessageFlags.Ephemeral 
+            });
         }
 
         app.status = 'accepted';
@@ -497,15 +537,24 @@ export const buttons = {
 
     appdeny: async (interaction) => {
         if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
-            return interaction.reply({ embeds: [embed(RED, 'You do not have permission to deny applications.')], flags: MessageFlags.Ephemeral });
+            return interaction.reply({ 
+                embeds: [embed(RED, 'You do not have permission to deny applications.')], 
+                flags: MessageFlags.Ephemeral 
+            });
         }
 
         const appId = interaction.customId.split(':')[1];
         const app = getAppById(appId);
-        if (!app) return interaction.reply({ embeds: [embed(RED, 'Application not found.')], flags: MessageFlags.Ephemeral });
+        if (!app) return interaction.reply({ 
+            embeds: [embed(RED, 'Application not found.')], 
+            flags: MessageFlags.Ephemeral 
+        });
 
         if (app.status !== 'pending') {
-            return interaction.reply({ embeds: [embed(RED, `This application has already been ${app.status}.`)], flags: MessageFlags.Ephemeral });
+            return interaction.reply({ 
+                embeds: [embed(RED, `This application has already been ${app.status}.`)], 
+                flags: MessageFlags.Ephemeral 
+            });
         }
 
         app.status = 'denied';
@@ -526,7 +575,10 @@ export const buttons = {
 
     'mgmt:select': async (interaction) => {
         if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
-            return interaction.reply({ embeds: [embed(RED, 'You do not have permission.')], flags: MessageFlags.Ephemeral });
+            return interaction.reply({ 
+                embeds: [embed(RED, 'You do not have permission.')], 
+                flags: MessageFlags.Ephemeral 
+            });
         }
 
         const rankId = interaction.values[0];
@@ -547,7 +599,10 @@ export const buttons = {
 
     'mgmt:enable': async (interaction) => {
         if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
-            return interaction.reply({ embeds: [embed(RED, 'You do not have permission.')], flags: MessageFlags.Ephemeral });
+            return interaction.reply({ 
+                embeds: [embed(RED, 'You do not have permission.')], 
+                flags: MessageFlags.Ephemeral 
+            });
         }
 
         const rankId = interaction.customId.split(':')[2];
@@ -567,7 +622,10 @@ export const buttons = {
 
     'mgmt:disable': async (interaction) => {
         if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
-            return interaction.reply({ embeds: [embed(RED, 'You do not have permission.')], flags: MessageFlags.Ephemeral });
+            return interaction.reply({ 
+                embeds: [embed(RED, 'You do not have permission.')], 
+                flags: MessageFlags.Ephemeral 
+            });
         }
 
         const rankId = interaction.customId.split(':')[2];
@@ -596,7 +654,10 @@ export const buttons = {
 
     'mgmt:back': async (interaction) => {
         if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
-            return interaction.reply({ embeds: [embed(RED, 'You do not have permission.')], flags: MessageFlags.Ephemeral });
+            return interaction.reply({ 
+                embeds: [embed(RED, 'You do not have permission.')], 
+                flags: MessageFlags.Ephemeral 
+            });
         }
         
         const selectMenu = new ActionRowBuilder().addComponents(
