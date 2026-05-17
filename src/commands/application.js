@@ -14,9 +14,8 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync } from 'fs';
 import { randomUUID } from 'crypto';
-import { DASHBOARD_ROLE, STAFF_ROLE, SUBMISSION_CHANNEL, RANKS } from './appConfig.js';
+import { DASHBOARD_ROLE, STAFF_ROLE, SUBMISSION_CHANNEL, RANKS } from '../appConfig.js';
 
-// ── Database ──────────────────────────────────────────────────
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(__dirname, '../../data');
 mkdirSync(dataDir, { recursive: true });
@@ -31,15 +30,14 @@ await db.write();
 
 const save = () => db.write();
 
-// ── Helpers ───────────────────────────────────────────────────
 const FOOTER = { text: 'Department of Homeland Security • Applications' };
-const GOLD   = 0xd4af37;
-const RED    = 0xc0392b;
-const GREEN  = 0x2ecc71;
-const DARK   = 0x2c2f33;
+const GOLD = 0xd4af37;
+const RED = 0xc0392b;
+const GREEN = 0x2ecc71;
+const DARK = 0x2c2f33;
 
 const rankQuestions = Object.fromEntries(RANKS.map((r) => [r.id, r.questions]));
-const allRankIds    = RANKS.map((r) => r.id);
+const allRankIds = RANKS.map((r) => r.id);
 
 function embed(color, description) {
     return new EmbedBuilder()
@@ -92,7 +90,6 @@ function actionButtons(appId, disabled = false) {
     );
 }
 
-// ── DM Flow ───────────────────────────────────────────────────
 async function runDmFlow(user, rankId, guild, onComplete) {
     const questions = rankQuestions[rankId];
 
@@ -212,7 +209,6 @@ async function runDmFlow(user, rankId, guild, onComplete) {
     return { success: true, app };
 }
 
-// ── /application command ──────────────────────────────────────
 export const data = new SlashCommandBuilder()
     .setName('application')
     .setDescription('Open the DHS application dashboard.');
@@ -238,7 +234,6 @@ export async function execute(interaction) {
     await interaction.reply({ embeds: [dashEmbed], components: rankButtons(interaction.guild) });
 }
 
-// ── /application-management command ──────────────────────────
 export const managementData = new SlashCommandBuilder()
     .setName('application-management')
     .setDescription('Manage the DHS application system configuration.');
@@ -279,7 +274,6 @@ function buildManagementMenu(guild) {
     );
 }
 
-// ── Button & Select Menu Handlers ─────────────────────────────
 export const buttons = {
     apply: async (interaction) => {
         const rankId = interaction.customId.split(':')[1];
@@ -317,12 +311,12 @@ export const buttons = {
                 .setThumbnail(app.avatarURL)
                 .setDescription(`<@${app.userId}> has submitted an application for <@&${rankId}>.`)
                 .addFields(
-                    { name: 'User',           value: `<@${app.userId}>`,    inline: true  },
-                    { name: 'User ID',        value: `\`${app.userId}\``,   inline: true  },
-                    { name: 'Role Applied',   value: `<@&${rankId}>`,        inline: false },
-                    { name: 'Application ID', value: `\`${app.id}\``,        inline: false },
-                    { name: 'Submitted',      value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
-                    { name: 'Status',         value: 'Pending Review',        inline: true  }
+                    { name: 'User', value: `<@${app.userId}>`, inline: true },
+                    { name: 'User ID', value: `\`${app.userId}\``, inline: true },
+                    { name: 'Role Applied', value: `<@&${rankId}>`, inline: false },
+                    { name: 'Application ID', value: `\`${app.id}\``, inline: false },
+                    { name: 'Submitted', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
+                    { name: 'Status', value: 'Pending Review', inline: true }
                 )
                 .setTimestamp()
                 .setFooter(FOOTER);
@@ -360,11 +354,11 @@ export const buttons = {
             .setThumbnail(app.avatarURL)
             .setDescription(`Reviewing application from <@${app.userId}> for <@&${app.rankId}>.`)
             .addFields(
-                { name: 'Applicant', value: `<@${app.userId}>`,  inline: true },
-                { name: 'User ID',   value: `\`${app.userId}\``, inline: true },
-                { name: 'Rank',      value: `<@&${app.rankId}>`, inline: false },
+                { name: 'Applicant', value: `<@${app.userId}>`, inline: true },
+                { name: 'User ID', value: `\`${app.userId}\``, inline: true },
+                { name: 'Rank', value: `<@&${app.rankId}>`, inline: false },
                 { name: 'Submitted', value: `<t:${Math.floor(new Date(app.createdAt).getTime() / 1000)}:F>`, inline: true },
-                { name: 'Status',    value: app.status.charAt(0).toUpperCase() + app.status.slice(1), inline: true }
+                { name: 'Status', value: app.status.charAt(0).toUpperCase() + app.status.slice(1), inline: true }
             )
             .setTimestamp()
             .setFooter(FOOTER);
@@ -434,8 +428,8 @@ export const buttons = {
             .setAuthor({ name: 'DHS Application Management' })
             .setTitle('Rank Configuration')
             .addFields(
-                { name: 'Rank',   value: `<@&${rankId}>`,          inline: true },
-                { name: 'Name',   value: role?.name ?? rankId,      inline: true },
+                { name: 'Rank', value: `<@&${rankId}>`, inline: true },
+                { name: 'Name', value: role?.name ?? rankId, inline: true },
                 { name: 'Status', value: isEnabled ? 'Enabled' : 'Disabled', inline: true }
             )
             .setTimestamp()
