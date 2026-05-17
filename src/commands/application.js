@@ -116,21 +116,48 @@ function submissionEmbed(app) {
   return embed;
 }
 
-function buildSummaryEmbed(questions, answers) {
-  const embed = new EmbedBuilder()
-    .setColor(GOLD)
-    .setAuthor({ name: 'DHS Application System' })
-    .setTitle('Application Summary')
-    .setDescription('Review your responses below. You may edit any answer before submitting.')
-    .setTimestamp()
-    .setFooter(FOOTER);
+const EMBED_FIELD_LIMIT = 25; // Discord hard cap per embed
 
-  for (const q of questions) {
-    const ans = answers.find((a) => a.questionId === q.id);
-    embed.addFields({ name: q.prompt.slice(0, 256), value: (ans?.value || '_No response_').slice(0, 1024), inline: false });
+// Returns one or two embeds depending on question count.
+// Discord rejects any embed with more than 25 fields — 28 questions would silently
+// prevent the summary message from sending at all.
+function buildSummaryEmbeds(questions, answers) {
+  const chunks = [];
+  for (let i = 0; i < questions.length; i += EMBED_FIELD_LIMIT) {
+    chunks.push(questions.slice(i, i + EMBED_FIELD_LIMIT));
   }
 
-  return embed;
+  return chunks.map((chunk, chunkIdx) => {
+    const embed = new EmbedBuilder()
+      .setColor(GOLD)
+      .setAuthor({ name: 'DHS Application System' })
+      .setTimestamp()
+      .setFooter(FOOTER);
+
+    if (chunkIdx === 0) {
+      embed.setTitle('Application Summary');
+      embed.setDescription('Review your responses below. You may edit any answer before submitting.');
+    } else {
+      embed.setTitle(`Application Summary (continued)`);
+    }
+
+    for (const q of chunk) {
+      const ans = answers.find((a) => a.questionId === q.id);
+      embed.addFields({
+        name: q.prompt.slice(0, 256),
+        value: (ans?.value || '_No response_').slice(0, 1024),
+        inline: false,
+      });
+    }
+
+    return embed;
+  });
+}
+
+// Kept for any callers that expect a single embed — returns the first embed only.
+// Use buildSummaryEmbeds() when sending messages.
+function buildSummaryEmbed(questions, answers) {
+  return buildSummaryEmbeds(questions, answers)[0];
 }
 
 // Builds summary components, paginating the edit select if questions > 25.
@@ -302,7 +329,7 @@ async function runDmFlow(user, rankId, onComplete) {
   }
 
   const summaryMsg = await dm.send({
-    embeds: [buildSummaryEmbed(questions, answers)],
+    embeds: buildSummaryEmbeds(questions, answers),
     components: buildSummaryComponents(questions, 0),
   }).catch(() => null);
 
@@ -322,7 +349,7 @@ async function runDmFlow(user, rankId, onComplete) {
       if (i.customId === 'app:submit') {
         collector.stop('submitted');
 
-        await i.update({ embeds: [buildSummaryEmbed(questions, sessionAnswers)], components: [] });
+        await i.update({ embeds: buildSummaryEmbeds(questions, sessionAnswers), components: [] });
 
         const app = {
           id: randomUUID(),
@@ -351,7 +378,7 @@ async function runDmFlow(user, rankId, onComplete) {
       if (i.customId.startsWith('app:editpage:')) {
         const newPage = parseInt(i.customId.split(':')[2]);
         await i.update({
-          embeds: [buildSummaryEmbed(questions, sessionAnswers)],
+          embeds: buildSummaryEmbeds(questions, sessionAnswers),
           components: buildSummaryComponents(questions, newPage),
         });
         return;
@@ -382,7 +409,7 @@ async function runDmFlow(user, rankId, onComplete) {
           const existing = sessionAnswers.find((a) => a.questionId === questionId);
           if (existing) existing.value = collected.first().content.trim();
           await summaryMsg.edit({
-            embeds: [buildSummaryEmbed(questions, sessionAnswers)],
+            embeds: buildSummaryEmbeds(questions, sessionAnswers),
             components: buildSummaryComponents(questions, currentPage),
           });
         } catch {
