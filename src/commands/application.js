@@ -789,16 +789,11 @@ export const buttons = {
     }
 
     const rankId = interaction.customId.split(':')[2];
+
+    // Acknowledge immediately — Discord requires a response within 3 seconds.
+    // We update the UI first, then do the slow DM work afterwards.
     const existing = db.data.enabledRanks.find((r) => r.id === rankId);
     if (existing) { existing.enabled = false; await save(); }
-
-    const pendingApps = db.data.applications.filter((a) => a.rankId === rankId && a.status === 'pending');
-    for (const app of pendingApps) {
-      const user = await interaction.client.users.fetch(app.userId).catch(() => null);
-      if (user) {
-        await user.send({ embeds: [errEmbed(`The application for ${rankNames[rankId]} has been disabled. If you believe this is a mistake, please open a ticket.`)] }).catch(() => null);
-      }
-    }
 
     await interaction.update({
       embeds: [buildMgmtRankEmbed(rankId)],
@@ -808,6 +803,15 @@ export const buttons = {
         new ButtonBuilder().setCustomId('mgmt:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
       )],
     });
+
+    // Fire-and-forget DM notifications — runs after the interaction is already acknowledged.
+    const pendingApps = db.data.applications.filter((a) => a.rankId === rankId && a.status === 'pending');
+    for (const app of pendingApps) {
+      const user = await interaction.client.users.fetch(app.userId).catch(() => null);
+      if (user) {
+        await user.send({ embeds: [errEmbed(`The application for ${rankNames[rankId]} has been disabled. If you believe this is a mistake, please open a ticket.`)] }).catch(() => null);
+      }
+    }
   },
 
   'mgmt:back': async (interaction) => {
@@ -833,6 +837,9 @@ export const modals = {
 
     const reason = interaction.fields.getTextInputValue('reason');
 
+    // Acknowledge immediately — message fetch + DM can exceed the 3s window.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => null);
+
     app.status = 'denied';
     app.reason = reason;
     app.reviewedBy = interaction.user.id;
@@ -844,7 +851,7 @@ export const modals = {
       if (msg) await msg.edit({ embeds: [submissionEmbed(app)], components: [actionButtons(appId, true)] }).catch(() => null);
     }
 
-    await interaction.reply({
+    await interaction.followUp({
       embeds: [
         new EmbedBuilder()
           .setColor(RED)
@@ -888,6 +895,17 @@ export const modals = {
 };
 
 async function executeBlacklist(interaction, app, appId, reason) {
+  // Acknowledge the interaction immediately before any slow network calls.
+  // blacklistpreset uses a select menu (update), blacklistmodal uses a modal (reply).
+  if (!interaction.replied && !interaction.deferred) {
+    const isModal = interaction.isModalSubmit?.();
+    if (isModal) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => null);
+    } else {
+      await interaction.deferUpdate().catch(() => null);
+    }
+  }
+
   app.status = 'blacklisted';
   app.reason = reason;
   app.reviewedBy = interaction.user.id;
@@ -918,10 +936,6 @@ async function executeBlacklist(interaction, app, appId, reason) {
         .setFooter(FOOTER),
     ],
   });
-
-  if (!interaction.replied && !interaction.deferred) {
-    await interaction.deferUpdate().catch(() => null);
-  }
 
   const user = await interaction.client.users.fetch(app.userId).catch(() => null);
   if (user) {
