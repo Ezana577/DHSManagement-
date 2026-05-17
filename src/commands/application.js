@@ -14,7 +14,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync } from 'fs';
 import { randomUUID } from 'crypto';
-import { DASHBOARD_ROLE, STAFF_ROLE, SUBMISSION_CHANNEL, RANKS } from '../appConfig.js';
+import { DASHBOARD_ROLE, STAFF_ROLE, SUBMISSION_CHANNEL, RANKS, OPERATIONS_CHIEF_ROLE } from '../appConfig.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(__dirname, '../../data');
@@ -23,9 +23,11 @@ mkdirSync(dataDir, { recursive: true });
 const db = new Low(new JSONFile(join(dataDir, 'applications.json')), {
     enabledRanks: [],
     applications: [],
+    activeApplications: new Map(),
 });
 await db.read();
-db.data = { enabledRanks: [], applications: [], ...db.data };
+if (!db.data.activeApplications) db.data.activeApplications = new Map();
+db.data = { enabledRanks: [], applications: [], activeApplications: new Map(), ...db.data };
 await db.write();
 
 const save = () => db.write();
@@ -37,7 +39,7 @@ const GREEN = 0x2ecc71;
 const DARK = 0x2c2f33;
 
 const rankQuestions = Object.fromEntries(RANKS.map((r) => [r.id, r.questions]));
-const allRankIds = RANKS.map((r) => r.id);
+const rankNames = Object.fromEntries(RANKS.map((r) => [r.id, r.name]));
 
 function embed(color, description) {
     return new EmbedBuilder()
@@ -62,24 +64,66 @@ function getAppById(id) {
     return db.data.applications.find((a) => a.id === id);
 }
 
-function rankButtons(guild) {
+function createApplicationEmbed(app, status = null) {
+    const embed = new EmbedBuilder()
+        .setColor(app.status === 'accepted' ? GREEN : app.status === 'denied' ? RED : GOLD)
+        .setAuthor({ name: 'DHS Application System' })
+        .setTitle(`Application for ${rankNames[app.rankId] || 'Unknown Rank'}`)
+        .setThumbnail(app.avatarURL)
+        .setDescription(`<@${app.userId}> has submitted an application.`)
+        .addFields(
+            { name: 'User', value: `<@${app.userId}>`, inline: true },
+            { name: 'Role Applied', value: rankNames[app.rankId] || 'Unknown', inline: true },
+            { name: 'Submitted', value: `<t:${Math.floor(new Date(app.createdAt).getTime() / 1000)}:F>`, inline: false },
+            { name: 'Status', value: app.status.charAt(0).toUpperCase() + app.status.slice(1), inline: true }
+        )
+        .setTimestamp()
+        .setFooter(FOOTER);
+    
+    return embed;
+}
+
+function createDashboardEmbed() {
     const active = getEnabledRanks();
-    const rows = [];
-    for (let i = 0; i < active.length; i += 5) {
-        const chunk = active.slice(i, i + 5);
-        rows.push(
-            new ActionRowBuilder().addComponents(
-                chunk.map((r) => {
-                    const role = guild.roles.cache.get(r.id);
-                    return new ButtonBuilder()
-                        .setCustomId(`apply:${r.id}`)
-                        .setLabel(role?.name ?? r.id)
-                        .setStyle(ButtonStyle.Secondary);
-                })
-            )
-        );
+    
+    if (active.length === 0) {
+        return new EmbedBuilder()
+            .setColor(RED)
+            .setAuthor({ name: 'DHS Application System' })
+            .setTitle('<:DHS:1429575172830134362> • DHS Application')
+            .setDescription('There are currently no applications open at the moment!')
+            .setTimestamp()
+            .setFooter(FOOTER);
     }
-    return rows;
+    
+    const rankList = active.map(r => `• ${rankNames[r.id] || r.id}`).join('\n');
+    
+    return new EmbedBuilder()
+        .setColor(GOLD)
+        .setAuthor({ name: 'DHS Application System' })
+        .setTitle('<:DHS:1429575172830134362> • DHS Application')
+        .setDescription(`Below are the current applications available at the moment. You may apply for more than one rank. If you get accepted into multiple, you will be placed into the highest one.\n\n**Available Ranks:**\n${rankList}\n\nSelect a rank from the dropdown below to begin.`)
+        .setTimestamp()
+        .setFooter(FOOTER);
+}
+
+function createRankSelectMenu() {
+    const active = getEnabledRanks();
+    
+    if (active.length === 0) return null;
+    
+    return new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId('apply_select')
+            .setPlaceholder('Select a rank to apply for...')
+            .addOptions(
+                active.map((rank) => ({
+                    label: rankNames[rank.id] || rank.id,
+                    value: rank.id,
+                    description: `Apply for ${rankNames[rank.id] || rank.id} position`,
+                }))
+            )
+    );
 }
 
 function actionButtons(appId, disabled = false) {
@@ -90,8 +134,9 @@ function actionButtons(appId, disabled = false) {
     );
 }
 
-async function runDmFlow(user, rankId, guild, onComplete) {
+async function runDmFlow(user, rankId, interaction, onComplete) {
     const questions = rankQuestions[rankId];
+    const rankName = rankNames[rankId];
 
     let dm;
     try { dm = await user.createDM(); }
@@ -102,9 +147,19 @@ async function runDmFlow(user, rankId, guild, onComplete) {
         return { success: false, reason: 'no_questions' };
     }
 
+    const checkIfStillEnabled = () => {
+        const entry = db.data.enabledRanks.find((r) => r.id === rankId && r.enabled);
+        return !!entry;
+    };
+
     const answers = [];
 
     for (let i = 0; i < questions.length; i++) {
+        if (!checkIfStillEnabled()) {
+            await dm.send({ embeds: [embed(RED, `The application for ${rankName} has been disabled. If you believe this is a mistake, please open a ticket.`)] }).catch(() => null);
+            return { success: false, reason: 'disabled' };
+        }
+
         const q = questions[i];
         const isChoice = q.type === 'choice';
 
@@ -170,8 +225,55 @@ async function runDmFlow(user, rankId, guild, onComplete) {
                 return { success: false, reason: 'timeout' };
             }
 
-            answers.push({ questionId: q.id, value: collected.first().content.trim() });
+            const answer = collected.first().content.trim();
+            answers.push({ questionId: q.id, value: answer });
+            
+            const editRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('edit_answer')
+                    .setLabel('Edit Response')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+            
+            const confirmEmbed = new EmbedBuilder()
+                .setColor(GREEN)
+                .setDescription(`> **Your response has been saved:**\n> ${answer}\n\nIf you want to change your answer, click the Edit Response button below.`)
+                .setTimestamp();
+            
+            const editMsg = await dm.send({ embeds: [confirmEmbed], components: [editRow] }).catch(() => null);
+            
+            if (editMsg) {
+                try {
+                    const editInteraction = await editMsg.awaitMessageComponent({
+                        filter: (btn) => btn.user.id === user.id,
+                        time: 30_000,
+                    });
+                    
+                    if (editInteraction.customId === 'edit_answer') {
+                        await editInteraction.update({ embeds: [qEmbed], components: [] });
+                        
+                        const newCollected = await dm.awaitMessages({
+                            filter: (m) => m.author.id === user.id,
+                            max: 1,
+                            time: 300_000,
+                            errors: ['time'],
+                        });
+                        
+                        const newAnswer = newCollected.first().content.trim();
+                        answers[answers.length - 1].value = newAnswer;
+                        
+                        await dm.send({ embeds: [embed(GREEN, 'Your response has been updated!')] }).catch(() => null);
+                    }
+                } catch {
+                    // No edit requested, continue
+                }
+            }
         }
+    }
+
+    if (!checkIfStillEnabled()) {
+        await dm.send({ embeds: [embed(RED, `The application for ${rankName} has been disabled. If you believe this is a mistake, please open a ticket.`)] }).catch(() => null);
+        return { success: false, reason: 'disabled' };
     }
 
     const app = {
@@ -218,20 +320,14 @@ export async function execute(interaction) {
         return interaction.reply({ embeds: [embed(RED, 'You do not have permission to use this command.')], flags: MessageFlags.Ephemeral });
     }
 
-    const active = getEnabledRanks();
-    if (!active.length) {
-        return interaction.reply({ embeds: [embed(RED, 'There are no ranks currently available for application.')], flags: MessageFlags.Ephemeral });
+    const dashboardEmbed = createDashboardEmbed();
+    const selectMenu = createRankSelectMenu();
+    
+    if (selectMenu) {
+        await interaction.reply({ embeds: [dashboardEmbed], components: [selectMenu] });
+    } else {
+        await interaction.reply({ embeds: [dashboardEmbed] });
     }
-
-    const dashEmbed = new EmbedBuilder()
-        .setColor(GOLD)
-        .setAuthor({ name: 'DHS Application System' })
-        .setTitle('Application Dashboard')
-        .setDescription('These are the current ranks available for application.\n\nSelect a rank below to begin.')
-        .setTimestamp()
-        .setFooter(FOOTER);
-
-    await interaction.reply({ embeds: [dashEmbed], components: rankButtons(interaction.guild) });
 }
 
 export const managementData = new SlashCommandBuilder()
@@ -243,40 +339,56 @@ export async function managementExecute(interaction) {
         return interaction.reply({ embeds: [embed(RED, 'You do not have permission to use this command.')], flags: MessageFlags.Ephemeral });
     }
 
-    await interaction.reply({ embeds: [buildManagementEmbed()], components: [buildManagementMenu(interaction.guild)], flags: MessageFlags.Ephemeral });
-}
+    const selectMenu = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId('mgmt:select')
+            .setPlaceholder('Select a rank to configure')
+            .addOptions([
+                ...RANKS.map((rank) => ({
+                    label: rank.name,
+                    value: rank.id,
+                    description: `Configure ${rank.name}`,
+                })),
+                {
+                    label: 'Operations Chief',
+                    value: OPERATIONS_CHIEF_ROLE,
+                    description: 'Configure Operations Chief',
+                }
+            ])
+    );
 
-function buildManagementEmbed() {
-    const lines = allRankIds.map((id) => {
-        const entry = db.data.enabledRanks.find((r) => r.id === id);
-        return `<@&${id}> — ${entry?.enabled ? 'Enabled' : 'Disabled'}`;
-    });
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
         .setColor(GOLD)
         .setAuthor({ name: 'DHS Application Management' })
         .setTitle('Application System Configuration')
-        .setDescription(lines.join('\n'))
+        .setDescription('Select a rank from the dropdown to enable/disable applications for that rank.')
+        .setTimestamp()
+        .setFooter(FOOTER);
+
+    await interaction.reply({ embeds: [embed], components: [selectMenu], flags: MessageFlags.Ephemeral });
+}
+
+function buildManagementEmbed(rankId) {
+    const entry = db.data.enabledRanks.find((r) => r.id === rankId);
+    const isEnabled = entry?.enabled ?? false;
+    const rankName = rankNames[rankId] || 'Unknown Rank';
+    
+    return new EmbedBuilder()
+        .setColor(GOLD)
+        .setAuthor({ name: 'DHS Application Management' })
+        .setTitle(`Configure ${rankName}`)
+        .addFields(
+            { name: 'Rank', value: rankName, inline: true },
+            { name: 'Status', value: isEnabled ? '✅ Enabled' : '❌ Disabled', inline: true }
+        )
         .setTimestamp()
         .setFooter(FOOTER);
 }
 
-function buildManagementMenu(guild) {
-    return new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder()
-            .setCustomId('mgmt:select')
-            .setPlaceholder('Select a rank to configure')
-            .addOptions(
-                allRankIds.slice(0, 25).map((id) => {
-                    const role = guild.roles.cache.get(id);
-                    return { label: role?.name ?? id, value: id, description: id };
-                })
-            )
-    );
-}
-
 export const buttons = {
-    apply: async (interaction) => {
-        const rankId = interaction.customId.split(':')[1];
+    'apply_select': async (interaction) => {
+        const rankId = interaction.values[0];
+        const rankName = rankNames[rankId];
 
         if (getPendingApp(interaction.user.id, rankId)) {
             return interaction.reply({ embeds: [embed(RED, 'You already have a pending application for this rank.')], flags: MessageFlags.Ephemeral });
@@ -293,36 +405,20 @@ export const buttons = {
                     .setColor(GOLD)
                     .setAuthor({ name: 'DHS Application System' })
                     .setTitle('Application Started')
-                    .setDescription(`The application process for <@&${rankId}> has started. Please check your DMs.`)
+                    .setDescription(`The application process for **${rankName}** has started. Please check your DMs.`)
                     .setTimestamp()
                     .setFooter(FOOTER),
             ],
             flags: MessageFlags.Ephemeral,
         });
 
-        const result = await runDmFlow(interaction.user, rankId, interaction.guild, async (app) => {
+        const result = await runDmFlow(interaction.user, rankId, interaction, async (app) => {
             const channel = await interaction.client.channels.fetch(SUBMISSION_CHANNEL).catch(() => null);
             if (!channel) return;
 
-            const subEmbed = new EmbedBuilder()
-                .setColor(GOLD)
-                .setAuthor({ name: 'DHS Application System' })
-                .setTitle(`Application for <@&${rankId}>`)
-                .setThumbnail(app.avatarURL)
-                .setDescription(`<@${app.userId}> has submitted an application for <@&${rankId}>.`)
-                .addFields(
-                    { name: 'User', value: `<@${app.userId}>`, inline: true },
-                    { name: 'User ID', value: `\`${app.userId}\``, inline: true },
-                    { name: 'Role Applied', value: `<@&${rankId}>`, inline: false },
-                    { name: 'Application ID', value: `\`${app.id}\``, inline: false },
-                    { name: 'Submitted', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
-                    { name: 'Status', value: 'Pending Review', inline: true }
-                )
-                .setTimestamp()
-                .setFooter(FOOTER);
-
+            const subEmbed = createApplicationEmbed(app);
             const msg = await channel.send({
-                content: `<@${app.userId}>`,
+                content: `<@&${STAFF_ROLE}>`,
                 embeds: [subEmbed],
                 components: [actionButtons(app.id)],
             });
@@ -352,12 +448,11 @@ export const buttons = {
             .setAuthor({ name: 'Application Review' })
             .setTitle(`Review — ${app.username}`)
             .setThumbnail(app.avatarURL)
-            .setDescription(`Reviewing application from <@${app.userId}> for <@&${app.rankId}>.`)
+            .setDescription(`Reviewing application from <@${app.userId}> for ${rankNames[app.rankId]}.`)
             .addFields(
                 { name: 'Applicant', value: `<@${app.userId}>`, inline: true },
-                { name: 'User ID', value: `\`${app.userId}\``, inline: true },
-                { name: 'Rank', value: `<@&${app.rankId}>`, inline: false },
-                { name: 'Submitted', value: `<t:${Math.floor(new Date(app.createdAt).getTime() / 1000)}:F>`, inline: true },
+                { name: 'Rank', value: rankNames[app.rankId] || 'Unknown', inline: true },
+                { name: 'Submitted', value: `<t:${Math.floor(new Date(app.createdAt).getTime() / 1000)}:F>`, inline: false },
                 { name: 'Status', value: app.status.charAt(0).toUpperCase() + app.status.slice(1), inline: true }
             )
             .setTimestamp()
@@ -388,8 +483,16 @@ export const buttons = {
         app.reviewedBy = interaction.user.id;
         await save();
 
-        await interaction.update({ components: [actionButtons(appId, true)] });
-        await interaction.channel.send({ content: `The application from <@${app.userId}> for <@&${app.rankId}> was accepted by <@${interaction.user.id}>.` });
+        const updatedEmbed = createApplicationEmbed(app);
+        await interaction.update({ embeds: [updatedEmbed], components: [actionButtons(appId, true)] });
+        
+        const channel = interaction.channel;
+        await channel.send({ content: `✅ The application from <@${app.userId}> for **${rankNames[app.rankId]}** was accepted by <@${interaction.user.id}>.` });
+        
+        const user = await interaction.client.users.fetch(app.userId).catch(() => null);
+        if (user) {
+            await user.send({ embeds: [embed(GREEN, `Your application for **${rankNames[app.rankId]}** has been accepted!`)] }).catch(() => null);
+        }
     },
 
     appdeny: async (interaction) => {
@@ -409,8 +512,16 @@ export const buttons = {
         app.reviewedBy = interaction.user.id;
         await save();
 
-        await interaction.update({ components: [actionButtons(appId, true)] });
-        await interaction.channel.send({ content: `The application from <@${app.userId}> for <@&${app.rankId}> was denied by <@${interaction.user.id}>.` });
+        const updatedEmbed = createApplicationEmbed(app);
+        await interaction.update({ embeds: [updatedEmbed], components: [actionButtons(appId, true)] });
+        
+        const channel = interaction.channel;
+        await channel.send({ content: `❌ The application from <@${app.userId}> for **${rankNames[app.rankId]}** was denied by <@${interaction.user.id}>.` });
+        
+        const user = await interaction.client.users.fetch(app.userId).catch(() => null);
+        if (user) {
+            await user.send({ embeds: [embed(RED, `Your application for **${rankNames[app.rankId]}** has been denied.`)] }).catch(() => null);
+        }
     },
 
     'mgmt:select': async (interaction) => {
@@ -421,24 +532,13 @@ export const buttons = {
         const rankId = interaction.values[0];
         const entry = db.data.enabledRanks.find((r) => r.id === rankId);
         const isEnabled = entry?.enabled ?? false;
-        const role = interaction.guild.roles.cache.get(rankId);
+        const rankName = rankNames[rankId] || 'Operations Chief';
 
-        const rankEmbed = new EmbedBuilder()
-            .setColor(GOLD)
-            .setAuthor({ name: 'DHS Application Management' })
-            .setTitle('Rank Configuration')
-            .addFields(
-                { name: 'Rank', value: `<@&${rankId}>`, inline: true },
-                { name: 'Name', value: role?.name ?? rankId, inline: true },
-                { name: 'Status', value: isEnabled ? 'Enabled' : 'Disabled', inline: true }
-            )
-            .setTimestamp()
-            .setFooter(FOOTER);
-
+        const rankEmbed = buildManagementEmbed(rankId);
+        
         const actionRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`mgmt:enable:${rankId}`).setLabel('Enable').setStyle(ButtonStyle.Success).setDisabled(isEnabled),
             new ButtonBuilder().setCustomId(`mgmt:disable:${rankId}`).setLabel('Disable').setStyle(ButtonStyle.Danger).setDisabled(!isEnabled),
-            new ButtonBuilder().setCustomId(`mgmt:remove:${rankId}`).setLabel('Remove from System').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('mgmt:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
         );
 
@@ -455,7 +555,14 @@ export const buttons = {
         if (existing) { existing.enabled = true; } else { db.data.enabledRanks.push({ id: rankId, enabled: true }); }
         await save();
 
-        await interaction.update({ embeds: [buildManagementEmbed(), embed(GREEN, `<@&${rankId}> has been enabled.`)], components: [buildManagementMenu(interaction.guild)] });
+        await interaction.update({ 
+            embeds: [embed(GREEN, `${rankNames[rankId] || 'Rank'} has been enabled.`), buildManagementEmbed(rankId)], 
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`mgmt:enable:${rankId}`).setLabel('Enable').setStyle(ButtonStyle.Success).setDisabled(true),
+                new ButtonBuilder().setCustomId(`mgmt:disable:${rankId}`).setLabel('Disable').setStyle(ButtonStyle.Danger).setDisabled(false),
+                new ButtonBuilder().setCustomId('mgmt:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
+            )]
+        });
     },
 
     'mgmt:disable': async (interaction) => {
@@ -466,26 +573,58 @@ export const buttons = {
         const rankId = interaction.customId.split(':')[2];
         const existing = db.data.enabledRanks.find((r) => r.id === rankId);
         if (existing) { existing.enabled = false; await save(); }
-
-        await interaction.update({ embeds: [buildManagementEmbed(), embed(RED, `<@&${rankId}> has been disabled.`)], components: [buildManagementMenu(interaction.guild)] });
-    },
-
-    'mgmt:remove': async (interaction) => {
-        if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
-            return interaction.reply({ embeds: [embed(RED, 'You do not have permission.')], flags: MessageFlags.Ephemeral });
+        
+        const rankName = rankNames[rankId] || 'Rank';
+        
+        const pendingApps = db.data.applications.filter(a => a.rankId === rankId && a.status === 'pending');
+        for (const app of pendingApps) {
+            const user = await interaction.client.users.fetch(app.userId).catch(() => null);
+            if (user) {
+                await user.send({ embeds: [embed(RED, `The application for ${rankName} has been disabled. If you believe this is a mistake, please open a ticket.`)] }).catch(() => null);
+            }
         }
 
-        const rankId = interaction.customId.split(':')[2];
-        db.data.enabledRanks = db.data.enabledRanks.filter((r) => r.id !== rankId);
-        await save();
-
-        await interaction.update({ embeds: [buildManagementEmbed(), embed(0x95a5a6, `<@&${rankId}> has been removed from the system.`)], components: [buildManagementMenu(interaction.guild)] });
+        await interaction.update({ 
+            embeds: [embed(RED, `${rankName} has been disabled.`), buildManagementEmbed(rankId)], 
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`mgmt:enable:${rankId}`).setLabel('Enable').setStyle(ButtonStyle.Success).setDisabled(false),
+                new ButtonBuilder().setCustomId(`mgmt:disable:${rankId}`).setLabel('Disable').setStyle(ButtonStyle.Danger).setDisabled(true),
+                new ButtonBuilder().setCustomId('mgmt:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
+            )]
+        });
     },
 
     'mgmt:back': async (interaction) => {
         if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
             return interaction.reply({ embeds: [embed(RED, 'You do not have permission.')], flags: MessageFlags.Ephemeral });
         }
-        await interaction.update({ embeds: [buildManagementEmbed()], components: [buildManagementMenu(interaction.guild)] });
+        
+        const selectMenu = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('mgmt:select')
+                .setPlaceholder('Select a rank to configure')
+                .addOptions([
+                    ...RANKS.map((rank) => ({
+                        label: rank.name,
+                        value: rank.id,
+                        description: `Configure ${rank.name}`,
+                    })),
+                    {
+                        label: 'Operations Chief',
+                        value: OPERATIONS_CHIEF_ROLE,
+                        description: 'Configure Operations Chief',
+                    }
+                ])
+        );
+        
+        const embed = new EmbedBuilder()
+            .setColor(GOLD)
+            .setAuthor({ name: 'DHS Application Management' })
+            .setTitle('Application System Configuration')
+            .setDescription('Select a rank from the dropdown to enable/disable applications for that rank.')
+            .setTimestamp()
+            .setFooter(FOOTER);
+        
+        await interaction.update({ embeds: [embed], components: [selectMenu] });
     },
 };
