@@ -29,6 +29,7 @@ db.data = { enabledRanks: [], applications: [], ...db.data };
 await db.write();
 
 const save = () => db.write();
+const activeSessions = new Set();
 
 const FOOTER = { text: 'Department of Homeland Security • Applications' };
 const GOLD = 0xd4af37;
@@ -154,8 +155,11 @@ async function runDmFlow(user, rankId, onComplete) {
   try { dm = await user.createDM(); }
   catch { return { success: false, reason: 'dm_failed' }; }
 
+  activeSessions.add(user.id);
+
   if (!questions?.length) {
     await dm.send({ embeds: [errEmbed('This application is not currently set up. Please contact staff.')] }).catch(() => null);
+    activeSessions.delete(user.id);
     return { success: false, reason: 'no_questions' };
   }
 
@@ -164,6 +168,7 @@ async function runDmFlow(user, rankId, onComplete) {
   for (let i = 0; i < questions.length; i++) {
     if (!isRankEnabled(rankId)) {
       await dm.send({ embeds: [errEmbed(`The application for ${rankName} has been disabled. If you believe this is a mistake, please open a ticket.`)] }).catch(() => null);
+      activeSessions.delete(user.id);
       return { success: false, reason: 'disabled' };
     }
 
@@ -212,6 +217,7 @@ async function runDmFlow(user, rankId, onComplete) {
         });
       } catch {
         await dm.send({ embeds: [errEmbed('Your application timed out. Please restart.')] }).catch(() => null);
+        activeSessions.delete(user.id);
         return { success: false, reason: 'timeout' };
       }
 
@@ -230,6 +236,7 @@ async function runDmFlow(user, rankId, onComplete) {
         });
       } catch {
         await dm.send({ embeds: [errEmbed('Your application timed out. Please restart.')] }).catch(() => null);
+        activeSessions.delete(user.id);
         return { success: false, reason: 'timeout' };
       }
 
@@ -239,6 +246,7 @@ async function runDmFlow(user, rankId, onComplete) {
 
   if (!isRankEnabled(rankId)) {
     await dm.send({ embeds: [errEmbed(`The application for ${rankName} has been disabled. If you believe this is a mistake, please open a ticket.`)] }).catch(() => null);
+    activeSessions.delete(user.id);
     return { success: false, reason: 'disabled' };
   }
 
@@ -284,6 +292,7 @@ async function runDmFlow(user, rankId, onComplete) {
         db.data.applications.push(app);
         await save();
 
+        activeSessions.delete(user.id);
         await onComplete(app);
         resolve({ success: true, app });
         return;
@@ -332,6 +341,7 @@ async function runDmFlow(user, rankId, onComplete) {
 
     collector.on('end', (_, reason) => {
       if (reason !== 'submitted') {
+        activeSessions.delete(user.id);
         dm.send({ embeds: [errEmbed('Your application session has expired. Please restart.')] }).catch(() => null);
         resolve({ success: false, reason: 'timeout' });
       }
@@ -456,6 +466,13 @@ export const buttons = {
 
   apply_select: async (interaction) => {
     const rankId = interaction.values[0];
+
+    if (activeSessions.has(interaction.user.id)) {
+      return interaction.reply({
+        embeds: [errEmbed('You already have an application in progress. Please complete it in your DMs first.')],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
 
     if (getAnyActiveApp(interaction.user.id)) {
       return interaction.reply({
