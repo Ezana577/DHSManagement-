@@ -7,6 +7,9 @@ import {
   StringSelectMenuBuilder,
   ComponentType,
   MessageFlags,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } from 'discord.js';
 import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
@@ -31,15 +34,23 @@ await db.write();
 const save = () => db.write();
 const activeSessions = new Set();
 
+const BLACKLIST_ROLE = '1400677455437762615';
 const FOOTER = { text: 'Department of Homeland Security • Applications' };
-const GOLD = 0xd4af37;
-const RED  = 0xc0392b;
+const GOLD  = 0xd4af37;
+const RED   = 0xc0392b;
 const GREEN = 0x2ecc71;
 const DARK  = 0x2c2f33;
+const BLACK = 0x1a1a1a;
 
 const rankQuestions = Object.fromEntries(RANKS.map((r) => [r.id, r.questions]));
 const rankNames     = Object.fromEntries(RANKS.map((r) => [r.id, r.name]));
 const allRankIds    = RANKS.map((r) => r.id);
+
+const DENY_PRESETS = null;
+const BLACKLIST_PRESETS = [
+  'You have been blacklisted due to using an artificial intelligence on this application. If you wish to appeal, please open a support ticket.',
+  'You have been blacklisted due to trolling. If you wish to appeal, please open a support ticket.',
+];
 
 function errEmbed(description) {
   return new EmbedBuilder()
@@ -54,16 +65,8 @@ function getEnabledRanks() {
   return db.data.enabledRanks.filter((r) => r.enabled);
 }
 
-function getPendingApp(userId, rankId) {
-  return db.data.applications.find(
-    (a) => a.userId === userId && a.rankId === rankId && a.status === 'pending'
-  );
-}
-
 function getAnyActiveApp(userId) {
-  return db.data.applications.find(
-    (a) => a.userId === userId && a.status === 'pending'
-  );
+  return db.data.applications.find((a) => a.userId === userId && a.status === 'pending');
 }
 
 function getAppById(id) {
@@ -74,33 +77,45 @@ function isRankEnabled(rankId) {
   return db.data.enabledRanks.some((r) => r.id === rankId && r.enabled);
 }
 
+function isBlacklisted(member) {
+  return member.roles.cache.has(BLACKLIST_ROLE);
+}
+
 function actionButtons(appId, disabled = false) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`appreview:${appId}`).setLabel('Review').setStyle(ButtonStyle.Primary).setDisabled(disabled),
     new ButtonBuilder().setCustomId(`appaccept:${appId}`).setLabel('Accept').setStyle(ButtonStyle.Success).setDisabled(disabled),
-    new ButtonBuilder().setCustomId(`appdeny:${appId}`).setLabel('Deny').setStyle(ButtonStyle.Danger).setDisabled(disabled)
+    new ButtonBuilder().setCustomId(`appdeny:${appId}`).setLabel('Deny').setStyle(ButtonStyle.Danger).setDisabled(disabled),
+    new ButtonBuilder().setCustomId(`appblacklist:${appId}`).setLabel('Blacklist').setStyle(ButtonStyle.Secondary).setDisabled(disabled)
   );
 }
 
 function submissionEmbed(app) {
-  const statusColor = app.status === 'accepted' ? GREEN : app.status === 'denied' ? RED : GOLD;
-  return new EmbedBuilder()
-    .setColor(statusColor)
+  const color = app.status === 'accepted' ? GREEN : app.status === 'denied' ? RED : app.status === 'blacklisted' ? BLACK : GOLD;
+  const statusLabel = app.status.charAt(0).toUpperCase() + app.status.slice(1);
+  const embed = new EmbedBuilder()
+    .setColor(color)
     .setAuthor({ name: 'DHS Application System' })
     .setTitle(`Application for ${rankNames[app.rankId] || 'Unknown Rank'}`)
     .setThumbnail(app.avatarURL)
     .setDescription(`<@${app.userId}> has submitted an application.`)
     .addFields(
-      { name: 'User',         value: `<@${app.userId}>`,  inline: true },
+      { name: 'User',         value: `<@${app.userId}>`, inline: true },
       { name: 'Role Applied', value: rankNames[app.rankId] || 'Unknown', inline: true },
       { name: 'Submitted',    value: `<t:${Math.floor(new Date(app.createdAt).getTime() / 1000)}:F>`, inline: false },
-      { name: 'Status',       value: app.status.charAt(0).toUpperCase() + app.status.slice(1), inline: true }
+      { name: 'Status',       value: statusLabel, inline: true }
     )
     .setTimestamp()
     .setFooter(FOOTER);
+
+  if (app.reason) {
+    embed.addFields({ name: 'Reason', value: `\`\`\`${app.reason}\`\`\``, inline: false });
+  }
+
+  return embed;
 }
 
-function buildSummaryEmbed(questions, answers, rankId) {
+function buildSummaryEmbed(questions, answers) {
   const embed = new EmbedBuilder()
     .setColor(GOLD)
     .setAuthor({ name: 'DHS Application System' })
@@ -117,34 +132,47 @@ function buildSummaryEmbed(questions, answers, rankId) {
   return embed;
 }
 
-function buildSummaryComponents(questions, submitted = false) {
-  const rows = [];
+function buildSummaryComponents(questions) {
+  const editSelect = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('app:edit_select')
+      .setPlaceholder('Select a question to edit...')
+      .addOptions(questions.map((q, i) => ({
+        label: `Question ${i + 1}`,
+        description: q.prompt.slice(0, 50),
+        value: q.id,
+      })))
+  );
 
-  if (!submitted) {
-    const editSelect = new ActionRowBuilder().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId('app:edit_select')
-        .setPlaceholder('Select a question to edit...')
-        .addOptions(
-          questions.map((q, i) => ({
-            label: `Question ${i + 1}`,
-            description: q.prompt.slice(0, 50),
-            value: q.id,
-          }))
-        )
-    );
+  const submitRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('app:submit')
+      .setLabel('Submit Application')
+      .setStyle(ButtonStyle.Success)
+  );
 
-    const submitRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('app:submit')
-        .setLabel('Submit Application')
-        .setStyle(ButtonStyle.Success)
-    );
+  return [editSelect, submitRow];
+}
 
-    rows.push(editSelect, submitRow);
+async function autoDenyBlacklistedApps(client, userId) {
+  const pending = db.data.applications.filter((a) => a.userId === userId && a.status === 'pending');
+  for (const app of pending) {
+    app.status = 'denied';
+    app.reason = 'This application was automatically denied because the applicant has been blacklisted.';
+    app.reviewedBy = client.user.id;
   }
+  if (pending.length > 0) await save();
 
-  return rows;
+  for (const app of pending) {
+    try {
+      const channel = await client.channels.fetch(SUBMISSION_CHANNEL).catch(() => null);
+      if (!channel) continue;
+      if (app.messageId) {
+        const msg = await channel.messages.fetch(app.messageId).catch(() => null);
+        if (msg) await msg.edit({ embeds: [submissionEmbed(app)], components: [actionButtons(app.id, true)] }).catch(() => null);
+      }
+    } catch {}
+  }
 }
 
 async function runDmFlow(user, rankId, onComplete) {
@@ -185,17 +213,13 @@ async function runDmFlow(user, rankId, onComplete) {
     if (isChoice) {
       const row = new ActionRowBuilder().addComponents(
         q.choices.slice(0, 5).map((label, idx) =>
-          new ButtonBuilder()
-            .setCustomId(`dmq:${idx}`)
-            .setLabel(label)
-            .setStyle(ButtonStyle.Secondary)
+          new ButtonBuilder().setCustomId(`dmq:${idx}`).setLabel(label).setStyle(ButtonStyle.Secondary)
         )
       );
 
       const msg = await dm.send({ embeds: [qEmbed], components: [row] }).catch(() => null);
-      if (!msg) return { success: false, reason: 'dm_failed' };
+      if (!msg) { activeSessions.delete(user.id); return { success: false, reason: 'dm_failed' }; }
 
-      let chosen;
       try {
         const btn = await msg.awaitMessageComponent({
           filter: (b) => b.user.id === user.id,
@@ -203,15 +227,12 @@ async function runDmFlow(user, rankId, onComplete) {
           time: 300_000,
         });
         const idx = parseInt(btn.customId.split(':')[1]);
-        chosen = q.choices[idx];
+        answers.push({ questionId: q.id, value: q.choices[idx] });
         await btn.update({
           components: [new ActionRowBuilder().addComponents(
             q.choices.slice(0, 5).map((label, j) =>
-              new ButtonBuilder()
-                .setCustomId(`dmq:${j}`)
-                .setLabel(label)
-                .setStyle(j === idx ? ButtonStyle.Primary : ButtonStyle.Secondary)
-                .setDisabled(true)
+              new ButtonBuilder().setCustomId(`dmq:${j}`).setLabel(label)
+                .setStyle(j === idx ? ButtonStyle.Primary : ButtonStyle.Secondary).setDisabled(true)
             )
           )],
         });
@@ -221,26 +242,19 @@ async function runDmFlow(user, rankId, onComplete) {
         return { success: false, reason: 'timeout' };
       }
 
-      answers.push({ questionId: q.id, value: chosen });
-
     } else {
       await dm.send({ embeds: [qEmbed] }).catch(() => null);
-
-      let collected;
       try {
-        collected = await dm.awaitMessages({
+        const collected = await dm.awaitMessages({
           filter: (m) => m.author.id === user.id,
-          max: 1,
-          time: 300_000,
-          errors: ['time'],
+          max: 1, time: 300_000, errors: ['time'],
         });
+        answers.push({ questionId: q.id, value: collected.first().content.trim() });
       } catch {
         await dm.send({ embeds: [errEmbed('Your application timed out. Please restart.')] }).catch(() => null);
         activeSessions.delete(user.id);
         return { success: false, reason: 'timeout' };
       }
-
-      answers.push({ questionId: q.id, value: collected.first().content.trim() });
     }
   }
 
@@ -251,11 +265,11 @@ async function runDmFlow(user, rankId, onComplete) {
   }
 
   const summaryMsg = await dm.send({
-    embeds: [buildSummaryEmbed(questions, answers, rankId)],
-    components: buildSummaryComponents(questions, false),
+    embeds: [buildSummaryEmbed(questions, answers)],
+    components: buildSummaryComponents(questions),
   }).catch(() => null);
 
-  if (!summaryMsg) return { success: false, reason: 'dm_failed' };
+  if (!summaryMsg) { activeSessions.delete(user.id); return { success: false, reason: 'dm_failed' }; }
 
   const sessionAnswers = [...answers];
 
@@ -265,16 +279,11 @@ async function runDmFlow(user, rankId, onComplete) {
   });
 
   return new Promise((resolve) => {
-    let editingQuestionId = null;
-
     collector.on('collect', async (i) => {
       if (i.customId === 'app:submit') {
         collector.stop('submitted');
 
-        await i.update({
-          embeds: [buildSummaryEmbed(questions, sessionAnswers, rankId)],
-          components: [],
-        });
+        await i.update({ embeds: [buildSummaryEmbed(questions, sessionAnswers)], components: [] });
 
         const app = {
           id: randomUUID(),
@@ -287,6 +296,7 @@ async function runDmFlow(user, rankId, onComplete) {
           createdAt: new Date().toISOString(),
           reviewedBy: null,
           messageId: null,
+          reason: null,
         };
 
         db.data.applications.push(app);
@@ -299,8 +309,8 @@ async function runDmFlow(user, rankId, onComplete) {
       }
 
       if (i.customId === 'app:edit_select') {
-        editingQuestionId = i.values[0];
-        const q = questions.find((q) => q.id === editingQuestionId);
+        const questionId = i.values[0];
+        const q = questions.find((q) => q.id === questionId);
 
         await i.reply({
           embeds: [
@@ -316,26 +326,17 @@ async function runDmFlow(user, rankId, onComplete) {
         try {
           const collected = await dm.awaitMessages({
             filter: (m) => m.author.id === user.id,
-            max: 1,
-            time: 300_000,
-            errors: ['time'],
+            max: 1, time: 300_000, errors: ['time'],
           });
-
-          const newValue = collected.first().content.trim();
-          const existing = sessionAnswers.find((a) => a.questionId === editingQuestionId);
-          if (existing) existing.value = newValue;
-
+          const existing = sessionAnswers.find((a) => a.questionId === questionId);
+          if (existing) existing.value = collected.first().content.trim();
           await summaryMsg.edit({
-            embeds: [buildSummaryEmbed(questions, sessionAnswers, rankId)],
-            components: buildSummaryComponents(questions, false),
+            embeds: [buildSummaryEmbed(questions, sessionAnswers)],
+            components: buildSummaryComponents(questions),
           });
-
         } catch {
           await dm.send({ embeds: [errEmbed('Edit timed out. Your previous answer was kept.')] }).catch(() => null);
         }
-
-        editingQuestionId = null;
-        return;
       }
     });
 
@@ -349,17 +350,14 @@ async function runDmFlow(user, rankId, onComplete) {
   });
 }
 
-// /application
+// ── /application ──────────────────────────────────────────────
 export const data = new SlashCommandBuilder()
   .setName('application')
   .setDescription('Send the application dashboard.');
 
 export async function execute(interaction) {
   if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
-    return interaction.reply({
-      embeds: [errEmbed('You do not have permission to use this command.')],
-      flags: MessageFlags.Ephemeral,
-    });
+    return interaction.reply({ embeds: [errEmbed('You do not have permission to use this command.')], flags: MessageFlags.Ephemeral });
   }
 
   await interaction.deferReply();
@@ -367,48 +365,52 @@ export async function execute(interaction) {
 
   const active = getEnabledRanks();
 
+  if (active.length === 0) {
+    return interaction.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(GOLD)
+          .setTitle('DHS Application System')
+          .setDescription('There are currently no applications open at the moment!')
+          .setTimestamp()
+          .setFooter(FOOTER),
+      ],
+    });
+  }
+
+  const rankList = active.map((r) => `• ${rankNames[r.id] || r.id}`).join('\n');
+
   const dashEmbed = new EmbedBuilder()
     .setColor(GOLD)
     .setTitle('DHS Application System')
     .setDescription(
-      active.length === 0
-        ? 'There are currently no applications open at the moment!'
-        : 'Below are the current applications available at the moment. You may apply for more than one rank. If you get accepted into multiple, you will be placed into the highest one.\n\nSelect a rank below to begin.'
+      `Below are the current applications available at the moment. You may apply for more than one rank. If you get accepted into multiple, you will be placed into the highest one.\n\n**Currently Open:**\n${rankList}\n\nSelect a rank below to begin.`
     )
     .setTimestamp()
     .setFooter(FOOTER);
-
-  if (active.length === 0) {
-    return interaction.channel.send({ embeds: [dashEmbed] });
-  }
 
   const selectMenu = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('apply_select')
       .setPlaceholder('Select a rank to apply for...')
-      .addOptions(
-        active.map((r) => ({
-          label: rankNames[r.id] || r.id,
-          value: r.id,
-          description: `Apply for ${rankNames[r.id] || r.id}`,
-        }))
-      )
+      .addOptions(active.map((r) => ({
+        label: rankNames[r.id] || r.id,
+        value: r.id,
+        description: `Apply for ${rankNames[r.id] || r.id}`,
+      })))
   );
 
   await interaction.channel.send({ embeds: [dashEmbed], components: [selectMenu] });
 }
 
-// /application-management
+// ── /application-management ───────────────────────────────────
 export const managementData = new SlashCommandBuilder()
   .setName('application-management')
   .setDescription('Manage the DHS application system configuration.');
 
 export async function managementExecute(interaction) {
   if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
-    return interaction.reply({
-      embeds: [errEmbed('You do not have permission to use this command.')],
-      flags: MessageFlags.Ephemeral,
-    });
+    return interaction.reply({ embeds: [errEmbed('You do not have permission to use this command.')], flags: MessageFlags.Ephemeral });
   }
 
   await interaction.reply({
@@ -437,13 +439,11 @@ function buildMgmtSelectMenu() {
     new StringSelectMenuBuilder()
       .setCustomId('mgmt:select')
       .setPlaceholder('Select a rank to configure...')
-      .addOptions(
-        allRankIds.slice(0, 25).map((id) => ({
-          label: rankNames[id] || id,
-          value: id,
-          description: `Configure ${rankNames[id] || id}`,
-        }))
-      )
+      .addOptions(allRankIds.slice(0, 25).map((id) => ({
+        label: rankNames[id] || id,
+        value: id,
+        description: `Configure ${rankNames[id] || id}`,
+      })))
   );
 }
 
@@ -462,10 +462,20 @@ function buildMgmtRankEmbed(rankId) {
     .setFooter(FOOTER);
 }
 
+// ── Button & Select Handlers ──────────────────────────────────
 export const buttons = {
 
   apply_select: async (interaction) => {
     const rankId = interaction.values[0];
+
+    const member = interaction.member;
+
+    if (isBlacklisted(member)) {
+      return interaction.reply({
+        embeds: [errEmbed('You are blacklisted and cannot submit an application.')],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
 
     if (activeSessions.has(interaction.user.id)) {
       return interaction.reply({
@@ -541,7 +551,7 @@ export const buttons = {
       .setThumbnail(app.avatarURL)
       .setDescription(`Reviewing application from <@${app.userId}> for ${rankNames[app.rankId]}.`)
       .addFields(
-        { name: 'Applicant', value: `<@${app.userId}>`,  inline: true },
+        { name: 'Applicant', value: `<@${app.userId}>`, inline: true },
         { name: 'Rank',      value: rankNames[app.rankId] || 'Unknown', inline: true },
         { name: 'Submitted', value: `<t:${Math.floor(new Date(app.createdAt).getTime() / 1000)}:F>`, inline: false },
         { name: 'Status',    value: app.status.charAt(0).toUpperCase() + app.status.slice(1), inline: true }
@@ -594,21 +604,93 @@ export const buttons = {
     if (!app) return interaction.reply({ embeds: [errEmbed('Application not found.')], flags: MessageFlags.Ephemeral });
     if (app.status !== 'pending') return interaction.reply({ embeds: [errEmbed(`This application has already been ${app.status}.`)], flags: MessageFlags.Ephemeral });
 
-    app.status = 'denied';
-    app.reviewedBy = interaction.user.id;
-    await save();
+    const modal = new ModalBuilder()
+      .setCustomId(`denymodal:${appId}`)
+      .setTitle('Deny Application')
+      .addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('reason')
+            .setLabel('Reason for denial')
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder('Provide a reason for denying this application...')
+            .setRequired(true)
+            .setMaxLength(500)
+        )
+      );
 
-    await interaction.update({ embeds: [submissionEmbed(app)], components: [actionButtons(appId, true)] });
-    await interaction.channel.send({
+    await interaction.showModal(modal);
+  },
+
+  appblacklist: async (interaction) => {
+    if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
+      return interaction.reply({ embeds: [errEmbed('You do not have permission to blacklist applicants.')], flags: MessageFlags.Ephemeral });
+    }
+
+    const appId = interaction.customId.split(':')[1];
+    const app = getAppById(appId);
+    if (!app) return interaction.reply({ embeds: [errEmbed('Application not found.')], flags: MessageFlags.Ephemeral });
+    if (app.status !== 'pending') return interaction.reply({ embeds: [errEmbed(`This application has already been ${app.status}.`)], flags: MessageFlags.Ephemeral });
+
+    const presetRow = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`blacklistpreset:${appId}`)
+        .setPlaceholder('Select a preset reason or choose custom...')
+        .addOptions([
+          { label: 'AI Usage', value: '0', description: 'Blacklisted for using AI on application' },
+          { label: 'Trolling', value: '1', description: 'Blacklisted for trolling' },
+          { label: 'Custom Reason', value: 'custom', description: 'Type your own reason' },
+        ])
+    );
+
+    await interaction.reply({
       embeds: [
         new EmbedBuilder()
-          .setColor(RED)
+          .setColor(BLACK)
           .setAuthor({ name: 'DHS Application System' })
-          .setDescription(`The application from <@${app.userId}> for **${rankNames[app.rankId]}** was denied by <@${interaction.user.id}>.`)
+          .setTitle('Blacklist Applicant')
+          .setDescription(`Select a reason to blacklist <@${app.userId}>.`)
           .setTimestamp()
           .setFooter(FOOTER),
       ],
+      components: [presetRow],
+      flags: MessageFlags.Ephemeral,
     });
+  },
+
+  'blacklistpreset': async (interaction) => {
+    if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
+      return interaction.reply({ embeds: [errEmbed('You do not have permission.')], flags: MessageFlags.Ephemeral });
+    }
+
+    const appId = interaction.customId.split(':')[1];
+    const app = getAppById(appId);
+    if (!app) return interaction.reply({ embeds: [errEmbed('Application not found.')], flags: MessageFlags.Ephemeral });
+
+    const choice = interaction.values[0];
+
+    if (choice === 'custom') {
+      const modal = new ModalBuilder()
+        .setCustomId(`blacklistmodal:${appId}`)
+        .setTitle('Blacklist — Custom Reason')
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('reason')
+              .setLabel('Reason for blacklist')
+              .setStyle(TextInputStyle.Paragraph)
+              .setPlaceholder('Provide a reason...')
+              .setRequired(true)
+              .setMaxLength(500)
+          )
+        );
+
+      await interaction.showModal(modal);
+      return;
+    }
+
+    const reason = BLACKLIST_PRESETS[parseInt(choice)];
+    await executeBlacklist(interaction, app, appId, reason);
   },
 
   'mgmt:select': async (interaction) => {
@@ -663,9 +745,7 @@ export const buttons = {
     for (const app of pendingApps) {
       const user = await interaction.client.users.fetch(app.userId).catch(() => null);
       if (user) {
-        await user.send({
-          embeds: [errEmbed(`The application for ${rankNames[rankId]} has been disabled. If you believe this is a mistake, please open a ticket.`)],
-        }).catch(() => null);
+        await user.send({ embeds: [errEmbed(`The application for ${rankNames[rankId]} has been disabled. If you believe this is a mistake, please open a ticket.`)] }).catch(() => null);
       }
     }
 
@@ -686,3 +766,126 @@ export const buttons = {
     await interaction.update({ embeds: [buildMgmtOverviewEmbed()], components: [buildMgmtSelectMenu()] });
   },
 };
+
+// ── Modal Handlers ────────────────────────────────────────────
+export const modals = {
+
+  denymodal: async (interaction) => {
+    if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
+      return interaction.reply({ embeds: [errEmbed('You do not have permission.')], flags: MessageFlags.Ephemeral });
+    }
+
+    const appId = interaction.customId.split(':')[1];
+    const app = getAppById(appId);
+    if (!app) return interaction.reply({ embeds: [errEmbed('Application not found.')], flags: MessageFlags.Ephemeral });
+    if (app.status !== 'pending') return interaction.reply({ embeds: [errEmbed(`This application has already been ${app.status}.`)], flags: MessageFlags.Ephemeral });
+
+    const reason = interaction.fields.getTextInputValue('reason');
+
+    app.status = 'denied';
+    app.reason = reason;
+    app.reviewedBy = interaction.user.id;
+    await save();
+
+    const originalChannel = interaction.channel;
+    if (app.messageId) {
+      const msg = await originalChannel.messages.fetch(app.messageId).catch(() => null);
+      if (msg) await msg.edit({ embeds: [submissionEmbed(app)], components: [actionButtons(appId, true)] }).catch(() => null);
+    }
+
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(RED)
+          .setAuthor({ name: 'DHS Application System' })
+          .setDescription(`The application from <@${app.userId}> for **${rankNames[app.rankId]}** was denied by <@${interaction.user.id}>.`)
+          .addFields({ name: 'Reason', value: `\`\`\`${reason}\`\`\``, inline: false })
+          .setTimestamp()
+          .setFooter(FOOTER),
+      ],
+    });
+
+    const user = await interaction.client.users.fetch(app.userId).catch(() => null);
+    if (user) {
+      await user.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(RED)
+            .setAuthor({ name: 'DHS Application System' })
+            .setTitle('Application Denied')
+            .setDescription(`Your application for **${rankNames[app.rankId]}** has been denied.`)
+            .addFields({ name: 'Reason', value: `\`\`\`${reason}\`\`\``, inline: false })
+            .setTimestamp()
+            .setFooter(FOOTER),
+        ],
+      }).catch(() => null);
+    }
+  },
+
+  blacklistmodal: async (interaction) => {
+    if (!interaction.member.roles.cache.has(STAFF_ROLE)) {
+      return interaction.reply({ embeds: [errEmbed('You do not have permission.')], flags: MessageFlags.Ephemeral });
+    }
+
+    const appId = interaction.customId.split(':')[1];
+    const app = getAppById(appId);
+    if (!app) return interaction.reply({ embeds: [errEmbed('Application not found.')], flags: MessageFlags.Ephemeral });
+
+    const reason = interaction.fields.getTextInputValue('reason');
+    await executeBlacklist(interaction, app, appId, reason);
+  },
+};
+
+async function executeBlacklist(interaction, app, appId, reason) {
+  app.status = 'blacklisted';
+  app.reason = reason;
+  app.reviewedBy = interaction.user.id;
+  await save();
+
+  const guild = interaction.guild;
+  const member = await guild.members.fetch(app.userId).catch(() => null);
+  if (member) {
+    await member.roles.add(BLACKLIST_ROLE).catch(() => null);
+  }
+
+  await autoDenyBlacklistedApps(interaction.client, app.userId);
+
+  const originalChannel = interaction.channel;
+  if (app.messageId) {
+    const msg = await originalChannel.messages.fetch(app.messageId).catch(() => null);
+    if (msg) await msg.edit({ embeds: [submissionEmbed(app)], components: [actionButtons(appId, true)] }).catch(() => null);
+  }
+
+  const respondFn = interaction.replied || interaction.deferred
+    ? (data) => interaction.followUp({ ...data, flags: MessageFlags.Ephemeral })
+    : (data) => interaction.update(data);
+
+  await respondFn({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(BLACK)
+        .setAuthor({ name: 'DHS Application System' })
+        .setDescription(`<@${app.userId}> has been blacklisted by <@${interaction.user.id}> for **${rankNames[app.rankId]}**.`)
+        .addFields({ name: 'Reason', value: `\`\`\`${reason}\`\`\``, inline: false })
+        .setTimestamp()
+        .setFooter(FOOTER),
+    ],
+    components: [],
+  });
+
+  const user = await interaction.client.users.fetch(app.userId).catch(() => null);
+  if (user) {
+    await user.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(BLACK)
+          .setAuthor({ name: 'DHS Application System' })
+          .setTitle('Application Blacklisted')
+          .setDescription(`Your application for **${rankNames[app.rankId]}** has resulted in a blacklist.`)
+          .addFields({ name: 'Reason', value: `\`\`\`${reason}\`\`\``, inline: false })
+          .setTimestamp()
+          .setFooter(FOOTER),
+      ],
+    }).catch(() => null);
+  }
+}
