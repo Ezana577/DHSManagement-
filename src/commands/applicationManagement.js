@@ -1,1 +1,1 @@
-export { managementData as data, managementExecute as execute, buttons } from './application.js';
+export { managementData as data, managementExecute as execute, buttons } from './application.js'; 
