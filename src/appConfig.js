@@ -2,9 +2,9 @@
 //  DHS APPLICATION SYSTEM — CONFIG
 // ================================================================
 
-export const STAFF_ROLE        = '1496312707907977387';
-export const SUBMISSION_CHANNEL = '1400610319524561076';
-export const OPERATIONS_CHIEF_ROLE = '1496312716707627099';
+export const STAFF_ROLE             = '1496312707907977387';
+export const SUBMISSION_CHANNEL     = '1400610319524561076';
+export const OPERATIONS_CHIEF_ROLE  = '1496312716707627099';
 
 // ----------------------------------------------------------------
 //  RANKS & QUESTIONS
@@ -63,6 +63,69 @@ const HR_QUESTIONS = (rankName) => [
     choices: ['Yes, I agree', 'No, I do not agree'] },
 ];
 
+const OC_QUESTIONS = [
+  // ── Basic ──────────────────────────────────────────────────
+  { id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
+  { id: 'q2', type: 'text', prompt: 'What is your Discord username or ID?' },
+  { id: 'q3', type: 'text', prompt: 'What is your current rank in DHS? If you are not DHS personnel, put N/A.' },
+
+  // ── Leadership ─────────────────────────────────────────────
+  { id: 'q4', type: 'choice', prompt: 'How would you describe your leadership style?',
+    choices: ['Lead from the front', 'Delegate and oversee', 'Adapt to the situation', 'Follow orders strictly'] },
+  { id: 'q5', type: 'text', prompt: 'Describe a time you had to make a quick decision under pressure. What happened and what did you decide?' },
+  { id: 'q6', type: 'choice', prompt: 'A unit under your command is underperforming during an operation. What is your first action?',
+    choices: ['Reassign them immediately', 'Address it calmly and redirect them', 'Report it to higher command', 'Ignore it and continue'] },
+  { id: 'q7', type: 'text', prompt: 'What do you think separates a good leader from a great one?' },
+  { id: 'q8', type: 'choice', prompt: 'If your superior gives you an order you personally disagree with, what do you do?',
+    choices: ['Refuse to follow it', 'Follow it and raise concerns privately', 'Follow it without question', 'Ask for a vote from the team'] },
+
+  // ── Scenarios ──────────────────────────────────────────────
+  { id: 'q9',  type: 'choice', prompt: 'Scenario 1: Two criminals are attempting to attack the Vice-Mayor. You have one other Agent with you. What do you do?',
+    choices: [
+      'Both agents engage the criminals directly',
+      'One agent covers the Vice-Mayor while the other engages',
+      'Retreat with the Vice-Mayor to a safe position and call backup',
+      'Radio for backup and hold position without engaging',
+    ] },
+  { id: 'q10', type: 'choice', prompt: 'Scenario 2: A Mafia with 4 members is planning to hostage a Whitelisted. You have 2 SRT and 3 HSI online. How do you handle it?',
+    choices: [
+      'Send all 5 members in at once',
+      'Deploy SRT to engage while HSI secures the Whitelisted',
+      'Wait for more backup before acting',
+      'Send HSI alone since it is an intelligence matter',
+    ] },
+  { id: 'q11', type: 'choice', prompt: 'Scenario 3: You are protecting the President. Three attackers enter with AK-47s. You have 2 Agents with pistols and 1 Agent with a rifle. How do you respond?',
+    choices: [
+      'All agents engage the attackers at once',
+      'Rifle Agent suppresses attackers while pistol Agents evacuate the President',
+      'Evacuate the President immediately and do not engage',
+      'Have all agents form a shield around the President and wait',
+    ] },
+  { id: 'q12', type: 'choice', prompt: 'Scenario 4: You are raiding a Mafia with 3 SRT members against 5 Mafia members. How do you approach this?',
+    choices: [
+      'Rush in with all 3 SRT members at once',
+      'Breach in a stack, clear room by room, and arrest where possible',
+      'Wait outside and attempt negotiation first',
+      'Call off the raid due to being outnumbered',
+    ] },
+
+  // ── Operations Chief Specific ──────────────────────────────
+  { id: 'q13', type: 'choice', prompt: 'There is an active operation but no Lead Supervisor (LS) is online and one is required for planning. What do you do?',
+    choices: ['Volunteer to fill the LS role', 'Cancel the operation', 'Run the operation without an LS', 'Wait until one comes online'] },
+  { id: 'q14', type: 'choice', prompt: 'The Director of Operations in the Executive Branch wants to promote someone to EB. Do you approve?',
+    choices: ['Yes, they have the authority', 'No, it requires additional oversight', 'Ask for the promotion criteria first', 'Escalate to higher command'] },
+  { id: 'q15', type: 'choice', prompt: 'A task requires a Lead Supervisor and you are available. Do you take it on?',
+    choices: ['Yes, always', 'Only if no one else is available', 'No, it is not my responsibility', 'Depends on the task'] },
+
+  // ── Agreement ──────────────────────────────────────────────
+  { id: 'q16', type: 'choice', prompt: 'Do you agree that using AI on this application will result in a blacklist?',
+    choices: ['Yes, I agree', 'No'] },
+  { id: 'q17', type: 'choice', prompt: 'Do you agree to remain active both in-game and on Discord?',
+    choices: ['Yes, I agree', 'No'] },
+  { id: 'q18', type: 'choice', prompt: 'Do you agree not to ask staff to read or rush your application?',
+    choices: ['Yes, I agree', 'No'] },
+];
+
 export const RANKS = [
   // ── Ranks with full HR questions ───────────────────────────
   {
@@ -91,18 +154,14 @@ export const RANKS = [
     questions: HR_QUESTIONS('Major'),
   },
 
-  // ── Ranks with questions still being configured ────────────
+  // ── Operations Chief ───────────────────────────────────────
   {
     id: '1496312716707627099',
     name: 'Operations Chief',
-    questions: [
-      { id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
-      { id: 'q2', type: 'text', prompt: 'What is your Discord username?' },
-      { id: 'q3', type: 'text', prompt: 'How long have you been in DHS?' },
-      { id: 'q4', type: 'text', prompt: 'Why are you applying for Operations Chief?' },
-      { id: 'q5', type: 'text', prompt: 'What leadership experience do you have?' },
-    ],
+    questions: OC_QUESTIONS,
   },
+
+  // ── Ranks with questions still being configured ────────────
   {
     id: '1400533214887411773',
     name: 'Director of Operations',
