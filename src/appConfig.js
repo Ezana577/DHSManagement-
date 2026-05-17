@@ -15,21 +15,93 @@ questions: [
 ],
 },
 {
-id: '1400534988709036032',
-name: 'Deputy Chief',
+id: '1400533214887411773',
+name: 'Director of Operations',
 questions: [
 { id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
 { id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
-{ id: 'q3', type: 'text', prompt: 'Why are you applying for Deputy Chief?' },
+{ id: 'q3', type: 'text', prompt: 'Why are you applying for Director of Operations?' },
 ],
 },
 {
-id: '1400535371380424855',
-name: 'Commander',
+id: '1496618836751814757',
+name: 'Deputy Director of Operations',
 questions: [
 { id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
 { id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
-{ id: 'q3', type: 'text', prompt: 'Why are you applying for Commander?' },
+{ id: 'q3', type: 'text', prompt: 'Why are you applying for Deputy Director of Operations?' },
+],
+},
+{
+id: '1496620834796601395',
+name: 'Assistant Director of Operations',
+questions: [
+{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
+{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
+{ id: 'q3', type: 'text', prompt: 'Why are you applying for Assistant Director of Operations?' },
+],
+},
+{
+id: '1496622105079320728',
+name: 'Director of Operations Intern',
+questions: [
+{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
+{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
+{ id: 'q3', type: 'text', prompt: 'Why are you applying for Director of Operations Intern?' },
+],
+},
+{
+id: '1496621256533999626',
+name: 'Chief Colonel',
+questions: [
+{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
+{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
+{ id: 'q3', type: 'text', prompt: 'Why are you applying for Chief Colonel?' },
+],
+},
+{
+id: '1400533726450159708',
+name: 'Senior Colonel',
+questions: [
+{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
+{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
+{ id: 'q3', type: 'text', prompt: 'Why are you applying for Senior Colonel?' },
+],
+},
+{
+id: '1400533823112085655',
+name: 'Colonel',
+questions: [
+{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
+{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
+{ id: 'q3', type: 'text', prompt: 'Why are you applying for Colonel?' },
+],
+},
+{
+id: '1400534336066949191',
+name: 'Lieutenant Colonel',
+questions: [
+{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
+{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
+{ id: 'q3', type: 'text', prompt: 'Why are you applying for Lieutenant Colonel?' },
+],
+},
+{
+id: '1400534430509961297',
+name: 'Major',
+questions: [
+{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
+{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
+{ id: 'q3', type: 'text', prompt: 'Why are you applying for Major?' },
+],
+},
+{
+id: '1400534498717990922',
+name: 'Senior Captain',
+questions: [
+{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
+{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
+{ id: 'q3', type: 'text', prompt: 'Why are you applying for Senior Captain?' },
 ],
 },
 {
@@ -42,57 +114,21 @@ questions: [
 ],
 },
 {
-id: '1400534498717990922',
+id: '1400535371380424855',
+name: 'Senior Lieutenant',
+questions: [
+{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
+{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
+{ id: 'q3', type: 'text', prompt: 'Why are you applying for Senior Lieutenant?' },
+],
+},
+{
+id: '1400534988709036032',
 name: 'Lieutenant',
 questions: [
 { id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
 { id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
 { id: 'q3', type: 'text', prompt: 'Why are you applying for Lieutenant?' },
-],
-},
-{
-id: '1400534430509961297',
-name: 'Sergeant',
-questions: [
-{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
-{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
-{ id: 'q3', type: 'text', prompt: 'Why are you applying for Sergeant?' },
-],
-},
-{
-id: '1400534336066949191',
-name: 'Corporal',
-questions: [
-{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
-{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
-{ id: 'q3', type: 'text', prompt: 'Why are you applying for Corporal?' },
-],
-},
-{
-id: '1400533823112085655',
-name: 'Senior Agent',
-questions: [
-{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
-{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
-{ id: 'q3', type: 'text', prompt: 'Why are you applying for Senior Agent?' },
-],
-},
-{
-id: '1400533726450159708',
-name: 'Agent',
-questions: [
-{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
-{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
-{ id: 'q3', type: 'text', prompt: 'Why are you applying for Agent?' },
-],
-},
-{
-id: '1496621256533999626',
-name: 'Probationary Agent',
-questions: [
-{ id: 'q1', type: 'text', prompt: 'What is your Roblox username?' },
-{ id: 'q2', type: 'text', prompt: 'How long have you been in DHS?' },
-{ id: 'q3', type: 'text', prompt: 'Why are you applying for Probationary Agent?' },
 ],
 },
 ];
