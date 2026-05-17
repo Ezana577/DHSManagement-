@@ -856,11 +856,7 @@ async function executeBlacklist(interaction, app, appId, reason) {
     if (msg) await msg.edit({ embeds: [submissionEmbed(app)], components: [actionButtons(appId, true)] }).catch(() => null);
   }
 
-  const respondFn = interaction.replied || interaction.deferred
-    ? (data) => interaction.followUp({ ...data, flags: MessageFlags.Ephemeral })
-    : (data) => interaction.update(data);
-
-  await respondFn({
+  await interaction.channel.send({
     embeds: [
       new EmbedBuilder()
         .setColor(BLACK)
@@ -870,8 +866,11 @@ async function executeBlacklist(interaction, app, appId, reason) {
         .setTimestamp()
         .setFooter(FOOTER),
     ],
-    components: [],
   });
+
+  if (!interaction.replied && !interaction.deferred) {
+    await interaction.deferUpdate().catch(() => null);
+  }
 
   const user = await interaction.client.users.fetch(app.userId).catch(() => null);
   if (user) {
