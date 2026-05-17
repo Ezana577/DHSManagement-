@@ -46,11 +46,12 @@ const rankQuestions = Object.fromEntries(RANKS.map((r) => [r.id, r.questions]));
 const rankNames     = Object.fromEntries(RANKS.map((r) => [r.id, r.name]));
 const allRankIds    = RANKS.map((r) => r.id);
 
-const DENY_PRESETS = null;
 const BLACKLIST_PRESETS = [
   'You have been blacklisted due to using an artificial intelligence on this application. If you wish to appeal, please open a support ticket.',
   'You have been blacklisted due to trolling. If you wish to appeal, please open a support ticket.',
 ];
+
+const SELECT_PAGE_SIZE = 25;
 
 function errEmbed(description) {
   return new EmbedBuilder()
@@ -126,30 +127,66 @@ function buildSummaryEmbed(questions, answers) {
 
   for (const q of questions) {
     const ans = answers.find((a) => a.questionId === q.id);
-    embed.addFields({ name: q.prompt, value: ans?.value || '_No response_', inline: false });
+    embed.addFields({ name: q.prompt.slice(0, 256), value: (ans?.value || '_No response_').slice(0, 1024), inline: false });
   }
 
   return embed;
 }
 
-function buildSummaryComponents(questions) {
+// Builds summary components, paginating the edit select if questions > 25.
+// page is 0-indexed.
+function buildSummaryComponents(questions, page = 0) {
+  const totalPages = Math.ceil(questions.length / SELECT_PAGE_SIZE);
+  const pageQuestions = questions.slice(page * SELECT_PAGE_SIZE, (page + 1) * SELECT_PAGE_SIZE);
+
   const editSelect = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
-      .setCustomId('app:edit_select')
-      .setPlaceholder('Select a question to edit...')
-      .addOptions(questions.map((q, i) => ({
-        label: `Question ${i + 1}`,
-        description: q.prompt.slice(0, 50),
-        value: q.id,
-      })))
+      .setCustomId(`app:edit_select:${page}`)
+      .setPlaceholder(
+        totalPages > 1
+          ? `Edit a question (page ${page + 1}/${totalPages})...`
+          : 'Select a question to edit...'
+      )
+      .addOptions(
+        pageQuestions.map((q, i) => {
+          const globalIdx = page * SELECT_PAGE_SIZE + i;
+          return {
+            label: `Question ${globalIdx + 1}`,
+            description: q.prompt.slice(0, 50),
+            value: q.id,
+          };
+        })
+      )
   );
 
-  const submitRow = new ActionRowBuilder().addComponents(
+  const submitRowButtons = [
     new ButtonBuilder()
       .setCustomId('app:submit')
       .setLabel('Submit Application')
-      .setStyle(ButtonStyle.Success)
-  );
+      .setStyle(ButtonStyle.Success),
+  ];
+
+  // Add prev/next page buttons when there are multiple pages
+  if (totalPages > 1) {
+    if (page > 0) {
+      submitRowButtons.unshift(
+        new ButtonBuilder()
+          .setCustomId(`app:editpage:${page - 1}`)
+          .setLabel('◀ Prev Questions')
+          .setStyle(ButtonStyle.Secondary)
+      );
+    }
+    if (page < totalPages - 1) {
+      submitRowButtons.push(
+        new ButtonBuilder()
+          .setCustomId(`app:editpage:${page + 1}`)
+          .setLabel('Next Questions ▶')
+          .setStyle(ButtonStyle.Secondary)
+      );
+    }
+  }
+
+  const submitRow = new ActionRowBuilder().addComponents(submitRowButtons);
 
   return [editSelect, submitRow];
 }
@@ -266,7 +303,7 @@ async function runDmFlow(user, rankId, onComplete) {
 
   const summaryMsg = await dm.send({
     embeds: [buildSummaryEmbed(questions, answers)],
-    components: buildSummaryComponents(questions),
+    components: buildSummaryComponents(questions, 0),
   }).catch(() => null);
 
   if (!summaryMsg) { activeSessions.delete(user.id); return { success: false, reason: 'dm_failed' }; }
@@ -280,6 +317,8 @@ async function runDmFlow(user, rankId, onComplete) {
 
   return new Promise((resolve) => {
     collector.on('collect', async (i) => {
+
+      // ── Submit ──────────────────────────────────────────────
       if (i.customId === 'app:submit') {
         collector.stop('submitted');
 
@@ -308,7 +347,19 @@ async function runDmFlow(user, rankId, onComplete) {
         return;
       }
 
-      if (i.customId === 'app:edit_select') {
+      // ── Page navigation ─────────────────────────────────────
+      if (i.customId.startsWith('app:editpage:')) {
+        const newPage = parseInt(i.customId.split(':')[2]);
+        await i.update({
+          embeds: [buildSummaryEmbed(questions, sessionAnswers)],
+          components: buildSummaryComponents(questions, newPage),
+        });
+        return;
+      }
+
+      // ── Edit select (customId = app:edit_select:<page>) ─────
+      if (i.customId.startsWith('app:edit_select:')) {
+        const currentPage = parseInt(i.customId.split(':')[2]);
         const questionId = i.values[0];
         const q = questions.find((q) => q.id === questionId);
 
@@ -332,11 +383,12 @@ async function runDmFlow(user, rankId, onComplete) {
           if (existing) existing.value = collected.first().content.trim();
           await summaryMsg.edit({
             embeds: [buildSummaryEmbed(questions, sessionAnswers)],
-            components: buildSummaryComponents(questions),
+            components: buildSummaryComponents(questions, currentPage),
           });
         } catch {
           await dm.send({ embeds: [errEmbed('Edit timed out. Your previous answer was kept.')] }).catch(() => null);
         }
+        return;
       }
     });
 
@@ -467,7 +519,6 @@ export const buttons = {
 
   apply_select: async (interaction) => {
     const rankId = interaction.values[0];
-
     const member = interaction.member;
 
     if (isBlacklisted(member)) {
@@ -561,7 +612,7 @@ export const buttons = {
 
     for (const q of questions) {
       const ans = app.answers.find((a) => a.questionId === q.id);
-      reviewEmbed.addFields({ name: q.prompt, value: ans?.value ?? '_No response_', inline: false });
+      reviewEmbed.addFields({ name: q.prompt.slice(0, 256), value: (ans?.value ?? '_No response_').slice(0, 1024), inline: false });
     }
 
     return interaction.reply({ embeds: [reviewEmbed], flags: MessageFlags.Ephemeral });
