@@ -44,7 +44,7 @@ const rankNames = Object.fromEntries(RANKS.map((r) => [r.id, r.name]));
 function embed(color, description) {
     return new EmbedBuilder()
         .setColor(color)
-        .setAuthor({ name: 'DHS Application System' })
+        .setAuthor({ name: '# DHS Application System' })
         .setDescription(`> ${description}`)
         .setTimestamp()
         .setFooter(FOOTER);
