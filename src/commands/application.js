@@ -90,7 +90,7 @@ function createDashboardEmbed() {
         return new EmbedBuilder()
             .setColor(RED)
             .setAuthor({ name: 'DHS Application System' })
-            .setTitle('<:DHS:1429575172830134362> • DHS Application')
+            .setTitle('DHS Application')
             .setDescription('There are currently no applications open at the moment!')
             .setTimestamp()
             .setFooter(FOOTER);
@@ -101,7 +101,7 @@ function createDashboardEmbed() {
     return new EmbedBuilder()
         .setColor(GOLD)
         .setAuthor({ name: 'DHS Application System' })
-        .setTitle('<:DHS:1429575172830134362> • DHS Application')
+        .setTitle('DHS Application')
         .setDescription(`Below are the current applications available at the moment. You may apply for more than one rank. If you get accepted into multiple, you will be placed into the highest one.\n\n**Available Ranks:**\n${rankList}\n\nSelect a rank from the dropdown below to begin.`)
         .setTimestamp()
         .setFooter(FOOTER);
@@ -313,7 +313,7 @@ async function runDmFlow(user, rankId, interaction, onComplete) {
 
 export const data = new SlashCommandBuilder()
     .setName('application')
-    .setDescription('Open the DHS application dashboard.');
+    .setDescription('Send application dashboard.');
 
 export async function execute(interaction) {
     if (!interaction.member.roles.cache.has(DASHBOARD_ROLE)) {
