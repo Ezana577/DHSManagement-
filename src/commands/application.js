@@ -90,7 +90,6 @@ function createDashboardEmbed() {
         return new EmbedBuilder()
             .setColor(RED)
             .setAuthor({ name: 'DHS Application System' })
-            .setTitle('DHS Application')
             .setDescription('There are currently no applications open at the moment!')
             .setTimestamp()
             .setFooter(FOOTER);
@@ -101,7 +100,6 @@ function createDashboardEmbed() {
     return new EmbedBuilder()
         .setColor(GOLD)
         .setAuthor({ name: 'DHS Application System' })
-        .setTitle('DHS Application')
         .setDescription(`Below are the current applications available at the moment. You may apply for more than one rank. If you get accepted into multiple, you will be placed into the highest one.\n\n**Available Ranks:**\n${rankList}\n\nSelect a rank from the dropdown below to begin.`)
         .setTimestamp()
         .setFooter(FOOTER);
@@ -323,15 +321,11 @@ export async function execute(interaction) {
         });
     }
 
-    // Defer the reply to give us time to process
     await interaction.deferReply();
     
-    // Delete the original command message to hide who sent it
     try {
         await interaction.deleteReply();
-    } catch (err) {
-        // If we can't delete, that's fine
-    }
+    } catch (err) {}
 
     const dashboardEmbed = createDashboardEmbed();
     const selectMenu = createRankSelectMenu();
@@ -355,21 +349,18 @@ export async function managementExecute(interaction) {
         });
     }
 
+    const uniqueRanks = RANKS.filter(rank => rank.id !== OPERATIONS_CHIEF_ROLE);
+
     const selectMenu = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
             .setCustomId('mgmt:select')
             .setPlaceholder('Select a rank to configure')
             .addOptions([
-                ...RANKS.map((rank) => ({
+                ...uniqueRanks.map((rank) => ({
                     label: rank.name,
                     value: rank.id,
                     description: `Configure ${rank.name}`,
-                })),
-                {
-                    label: 'Operations Chief',
-                    value: OPERATIONS_CHIEF_ROLE,
-                    description: 'Configure Operations Chief',
-                }
+                }))
             ])
     );
 
@@ -660,21 +651,18 @@ export const buttons = {
             });
         }
         
+        const uniqueRanks = RANKS.filter(rank => rank.id !== OPERATIONS_CHIEF_ROLE);
+        
         const selectMenu = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
                 .setCustomId('mgmt:select')
                 .setPlaceholder('Select a rank to configure')
                 .addOptions([
-                    ...RANKS.map((rank) => ({
+                    ...uniqueRanks.map((rank) => ({
                         label: rank.name,
                         value: rank.id,
                         description: `Configure ${rank.name}`,
-                    })),
-                    {
-                        label: 'Operations Chief',
-                        value: OPERATIONS_CHIEF_ROLE,
-                        description: 'Configure Operations Chief',
-                    }
+                    }))
                 ])
         );
         
