@@ -169,4 +169,5 @@ export async function execute(interaction) {
     reportSent: false,
     timer,
   });
+  console.log(`[ActivityCheck] Check registered — msgId=${msg.id} roleId=${role.id} duration=${durationMs}ms`);
 }
