@@ -30,51 +30,56 @@ function parseTime(input) {
   return value * map[unit];
 }
 
-async function sendReport(msg, role, guild) {
-  const fetchedMsg = await msg.fetch().catch(() => null);
-  if (!fetchedMsg) return;
+async function sendReport(msg, roleId, guild) {
+  try {
+    const fetchedMsg = await msg.fetch().catch(() => null);
+    if (!fetchedMsg) return;
 
-  const checkReaction = fetchedMsg.reactions.cache.get(CHECK_EMOJI);
-  const reactedUserIds = new Set();
+    const checkReaction = fetchedMsg.reactions.cache.get(CHECK_EMOJI);
+    const reactedUserIds = new Set();
 
-  if (checkReaction) {
-    const users = await checkReaction.users.fetch().catch(() => null);
-    if (users) users.forEach((u) => { if (!u.bot) reactedUserIds.add(u.id); });
-  }
+    if (checkReaction) {
+      const users = await checkReaction.users.fetch().catch(() => null);
+      if (users) users.forEach((u) => { if (!u.bot) reactedUserIds.add(u.id); });
+    }
 
-  const allMembers = await guild.members.fetch().catch(() => null);
-  if (!allMembers) return;
+    const allMembers = await guild.members.fetch().catch(() => null);
+    if (!allMembers) return;
 
-  const roleMembers = allMembers.filter((m) => m.roles.cache.has(role.id) && !m.user.bot);
-  const nonReacted = roleMembers.filter((m) => !reactedUserIds.has(m.id));
+    const roleMembers = allMembers.filter((m) => m.roles.cache.has(roleId) && !m.user.bot);
+    const nonReacted = roleMembers.filter((m) => !reactedUserIds.has(m.id));
 
-  if (nonReacted.size === 0) {
-    return msg.reply({
+    if (nonReacted.size === 0) {
+      await msg.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(COLOR)
+            .setAuthor({ name: 'DHS Activity Check' })
+            .setTitle('Activity Check — Results')
+            .setDescription('All members with the role reacted. No absences recorded.')
+            .setTimestamp()
+            .setFooter(FOOTER),
+        ],
+      });
+      return;
+    }
+
+    const list = nonReacted.map((m) => `• <@${m.id}>`).join('\n');
+
+    await msg.reply({
       embeds: [
         new EmbedBuilder()
           .setColor(COLOR)
           .setAuthor({ name: 'DHS Activity Check' })
           .setTitle('Activity Check — Results')
-          .setDescription('All members with the role reacted. No absences recorded.')
+          .setDescription(`Below are those who did not react to the activity check:\n\n${list}`)
           .setTimestamp()
           .setFooter(FOOTER),
       ],
     });
+  } catch (err) {
+    console.error('[ActivityCheck] sendReport error:', err);
   }
-
-  const list = nonReacted.map((m) => `• <@${m.id}>`).join('\n');
-
-  await msg.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setColor(COLOR)
-        .setAuthor({ name: 'DHS Activity Check' })
-        .setTitle('Activity Check — Results')
-        .setDescription(`Below are those who did not react to the activity check:\n\n${list}`)
-        .setTimestamp()
-        .setFooter(FOOTER),
-    ],
-  });
 }
 
 export const data = new SlashCommandBuilder()
@@ -124,6 +129,8 @@ export async function execute(interaction) {
   }
 
   const unixDeadline = Math.floor((Date.now() + durationMs) / 1000);
+  const guild = interaction.guild;
+  const channel = interaction.channel;
 
   const embed = new EmbedBuilder()
     .setColor(COLOR)
@@ -137,74 +144,76 @@ export async function execute(interaction) {
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const msg = await interaction.channel.send({
-    content: `${role}`,
-    embeds: [embed],
-  });
+  const msg = await channel.send({ content: `${role}`, embeds: [embed] });
 
   await msg.react(CHECK_EMOJI).catch(() => null);
   await interaction.deleteReply().catch(() => null);
 
   let reportSent = false;
 
-  const doReport = async () => {
+  const finish = async () => {
     if (reportSent) return;
     reportSent = true;
-    await sendReport(msg, role, interaction.guild);
+    await sendReport(msg, role.id, guild);
   };
 
-  const timer = setTimeout(doReport, durationMs);
+  const timer = setTimeout(finish, durationMs);
 
   const collector = msg.createReactionCollector({
     filter: () => true,
-    time: durationMs,
+    time: durationMs + 5_000,
   });
 
   collector.on('collect', async (reaction, user) => {
-    if (user.bot) return;
+    try {
+      if (user.bot) return;
 
-    if (reaction.partial) {
-      try { await reaction.fetch(); } catch { return; }
-    }
+      if (reaction.partial) {
+        try { await reaction.fetch(); } catch { return; }
+      }
 
-    if (reaction.emoji.name !== CHECK_EMOJI) {
-      await reaction.users.remove(user.id).catch(() => null);
-      return;
-    }
+      if (reaction.emoji.name !== CHECK_EMOJI) {
+        await reaction.users.remove(user.id).catch(() => null);
+        return;
+      }
 
-    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-    if (!member?.roles.cache.has(role.id)) {
-      await reaction.users.remove(user.id).catch(() => null);
-      return;
-    }
+      const member = await guild.members.fetch(user.id).catch(() => null);
+      if (!member?.roles.cache.has(role.id)) {
+        await reaction.users.remove(user.id).catch(() => null);
+        return;
+      }
 
-    const allMembers = await interaction.guild.members.fetch().catch(() => null);
-    if (!allMembers) return;
+      if (reportSent) return;
 
-    const roleMembers = allMembers.filter((m) => m.roles.cache.has(role.id) && !m.user.bot);
+      const freshMsg = await msg.fetch().catch(() => null);
+      if (!freshMsg) return;
 
-    const fetchedMsg = await msg.fetch().catch(() => null);
-    if (!fetchedMsg) return;
+      const freshReaction = freshMsg.reactions.cache.get(CHECK_EMOJI);
+      const reactedIds = new Set();
+      if (freshReaction) {
+        const users = await freshReaction.users.fetch().catch(() => null);
+        if (users) users.forEach((u) => { if (!u.bot) reactedIds.add(u.id); });
+      }
 
-    const checkReaction = fetchedMsg.reactions.cache.get(CHECK_EMOJI);
-    const reactedUserIds = new Set();
-    if (checkReaction) {
-      const users = await checkReaction.users.fetch().catch(() => null);
-      if (users) users.forEach((u) => { if (!u.bot) reactedUserIds.add(u.id); });
-    }
+      const allMembers = await guild.members.fetch().catch(() => null);
+      if (!allMembers) return;
 
-    const allReacted = roleMembers.every((m) => reactedUserIds.has(m.id));
-    if (allReacted) {
-      clearTimeout(timer);
-      collector.stop('all_reacted');
-      await doReport();
+      const roleMembers = allMembers.filter((m) => m.roles.cache.has(role.id) && !m.user.bot);
+      const allReacted = roleMembers.size > 0 && roleMembers.every((m) => reactedIds.has(m.id));
+
+      if (allReacted) {
+        clearTimeout(timer);
+        collector.stop('all_reacted');
+        await finish();
+      }
+    } catch (err) {
+      console.error('[ActivityCheck] collect error:', err);
     }
   });
 
-  collector.on('end', (_, reason) => {
-    if (reason !== 'all_reacted') {
-      clearTimeout(timer);
-      doReport();
-    }
+  collector.on('end', async (_, reason) => {
+    if (reason === 'all_reacted') return;
+    clearTimeout(timer);
+    await finish();
   });
 }
