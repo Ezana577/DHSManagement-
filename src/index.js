@@ -112,8 +112,11 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 
 const eventFiles = readdirSync(join(__dirname, 'events')).filter((f) => f.endsWith('.js'));
+console.log('[DHS] events folder contents:', eventFiles);
+
 for (const file of eventFiles) {
     const event = await import(`./events/${file}`);
+    console.log(`[DHS] Registering event: ${event.name}`);
     const handler = (...args) => {
         if (event.name === 'interactionCreate') {
             event.execute(...args, client.commands, client.buttons, client.modals);
