@@ -113,7 +113,26 @@ export async function execute(interaction) {
     const member = await interaction.guild.members.fetch(user.id).catch(() => null);
     if (!member?.roles.cache.has(role.id)) {
       await reaction.users.remove(user.id).catch(() => null);
+      return;
     }
+
+    const fetchedMsg = await interaction.channel.messages.fetch(msg.id).catch(() => null);
+    if (!fetchedMsg) return;
+
+    const checkReaction = fetchedMsg.reactions.cache.get(CHECK_EMOJI);
+    const reactedUserIds = new Set();
+    if (checkReaction) {
+      const users = await checkReaction.users.fetch().catch(() => null);
+      if (users) users.forEach((u) => { if (!u.bot) reactedUserIds.add(u.id); });
+    }
+
+    const allMembers = await interaction.guild.members.fetch().catch(() => null);
+    if (!allMembers) return;
+
+    const roleMembers = allMembers.filter((m) => m.roles.cache.has(role.id) && !m.user.bot);
+    const allReacted = roleMembers.every((m) => reactedUserIds.has(m.id));
+
+    if (allReacted) reactionCollector.stop('all_reacted');
   });
 
   reactionCollector.on('end', async () => {
