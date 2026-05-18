@@ -59,8 +59,12 @@ async function removeCheck(msgId) {
 }
 
 export async function sendReport(msgId, client) {
+  if (inProgress.has(msgId)) return;
+  inProgress.add(msgId);
+
+  await db.read();
   const record = db.data.checks.find((c) => c.msgId === msgId);
-  if (!record) return;
+  if (!record) { inProgress.delete(msgId); return; }
 
   try {
     const channel = await client.channels.fetch(record.channelId).catch(() => null);
@@ -104,6 +108,7 @@ export async function sendReport(msgId, client) {
   } catch (err) {
     console.error('[ActivityCheck] sendReport error:', err);
   } finally {
+    inProgress.delete(msgId);
     await removeCheck(msgId);
   }
 }
