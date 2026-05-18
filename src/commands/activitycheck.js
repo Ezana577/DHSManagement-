@@ -14,6 +14,8 @@ const CHECK_EMOJI = '✅';
 const FOOTER = { text: 'Department of Homeland Security • Activity Check' };
 const COLOR = 0x1d72d7;
 
+export const activeChecks = new Map();
+
 function parseTime(input) {
   const match = input.match(/^(\d+)(s|mi|h|d|mo|y)$/i);
   if (!match) return null;
@@ -30,24 +32,35 @@ function parseTime(input) {
   return value * map[unit];
 }
 
-async function sendReport(msg, roleId, guild) {
-  try {
-    const fetchedMsg = await msg.fetch().catch(() => null);
-    if (!fetchedMsg) return;
+export async function sendReport(msgId, client) {
+  const check = activeChecks.get(msgId);
+  if (!check || check.reportSent) return;
+  check.reportSent = true;
+  clearTimeout(check.timer);
 
-    const checkReaction = fetchedMsg.reactions.cache.get(CHECK_EMOJI);
-    const reactedUserIds = new Set();
+  try {
+    const channel = await client.channels.fetch(check.channelId).catch(() => null);
+    if (!channel) return;
+
+    const msg = await channel.messages.fetch(msgId).catch(() => null);
+    if (!msg) return;
+
+    const guild = await client.guilds.fetch(check.guildId).catch(() => null);
+    if (!guild) return;
+
+    const checkReaction = msg.reactions.cache.get(CHECK_EMOJI);
+    const reactedIds = new Set();
 
     if (checkReaction) {
       const users = await checkReaction.users.fetch().catch(() => null);
-      if (users) users.forEach((u) => { if (!u.bot) reactedUserIds.add(u.id); });
+      if (users) users.forEach((u) => { if (!u.bot) reactedIds.add(u.id); });
     }
 
     const allMembers = await guild.members.fetch().catch(() => null);
     if (!allMembers) return;
 
-    const roleMembers = allMembers.filter((m) => m.roles.cache.has(roleId) && !m.user.bot);
-    const nonReacted = roleMembers.filter((m) => !reactedUserIds.has(m.id));
+    const roleMembers = allMembers.filter((m) => m.roles.cache.has(check.roleId) && !m.user.bot);
+    const nonReacted = roleMembers.filter((m) => !reactedIds.has(m.id));
 
     if (nonReacted.size === 0) {
       await msg.reply({
@@ -61,24 +74,24 @@ async function sendReport(msg, roleId, guild) {
             .setFooter(FOOTER),
         ],
       });
-      return;
+    } else {
+      const list = nonReacted.map((m) => `• <@${m.id}>`).join('\n');
+      await msg.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(COLOR)
+            .setAuthor({ name: 'DHS Activity Check' })
+            .setTitle('Activity Check — Results')
+            .setDescription(`Below are those who did not react to the activity check:\n\n${list}`)
+            .setTimestamp()
+            .setFooter(FOOTER),
+        ],
+      });
     }
-
-    const list = nonReacted.map((m) => `• <@${m.id}>`).join('\n');
-
-    await msg.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(COLOR)
-          .setAuthor({ name: 'DHS Activity Check' })
-          .setTitle('Activity Check — Results')
-          .setDescription(`Below are those who did not react to the activity check:\n\n${list}`)
-          .setTimestamp()
-          .setFooter(FOOTER),
-      ],
-    });
   } catch (err) {
     console.error('[ActivityCheck] sendReport error:', err);
+  } finally {
+    activeChecks.delete(msgId);
   }
 }
 
@@ -129,8 +142,6 @@ export async function execute(interaction) {
   }
 
   const unixDeadline = Math.floor((Date.now() + durationMs) / 1000);
-  const guild = interaction.guild;
-  const channel = interaction.channel;
 
   const embed = new EmbedBuilder()
     .setColor(COLOR)
@@ -144,76 +155,18 @@ export async function execute(interaction) {
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const msg = await channel.send({ content: `${role}`, embeds: [embed] });
+  const msg = await interaction.channel.send({ content: `${role}`, embeds: [embed] });
 
   await msg.react(CHECK_EMOJI).catch(() => null);
   await interaction.deleteReply().catch(() => null);
 
-  let reportSent = false;
+  const timer = setTimeout(() => sendReport(msg.id, interaction.client), durationMs);
 
-  const finish = async () => {
-    if (reportSent) return;
-    reportSent = true;
-    await sendReport(msg, role.id, guild);
-  };
-
-  const timer = setTimeout(finish, durationMs);
-
-  const collector = msg.createReactionCollector({
-    filter: () => true,
-    time: durationMs + 5_000,
-  });
-
-  collector.on('collect', async (reaction, user) => {
-    try {
-      if (user.bot) return;
-
-      if (reaction.partial) {
-        try { await reaction.fetch(); } catch { return; }
-      }
-
-      if (reaction.emoji.name !== CHECK_EMOJI) {
-        await reaction.users.remove(user.id).catch(() => null);
-        return;
-      }
-
-      const member = await guild.members.fetch(user.id).catch(() => null);
-      if (!member?.roles.cache.has(role.id)) {
-        await reaction.users.remove(user.id).catch(() => null);
-        return;
-      }
-
-      if (reportSent) return;
-
-      const freshMsg = await msg.fetch().catch(() => null);
-      if (!freshMsg) return;
-
-      const freshReaction = freshMsg.reactions.cache.get(CHECK_EMOJI);
-      const reactedIds = new Set();
-      if (freshReaction) {
-        const users = await freshReaction.users.fetch().catch(() => null);
-        if (users) users.forEach((u) => { if (!u.bot) reactedIds.add(u.id); });
-      }
-
-      const allMembers = await guild.members.fetch().catch(() => null);
-      if (!allMembers) return;
-
-      const roleMembers = allMembers.filter((m) => m.roles.cache.has(role.id) && !m.user.bot);
-      const allReacted = roleMembers.size > 0 && roleMembers.every((m) => reactedIds.has(m.id));
-
-      if (allReacted) {
-        clearTimeout(timer);
-        collector.stop('all_reacted');
-        await finish();
-      }
-    } catch (err) {
-      console.error('[ActivityCheck] collect error:', err);
-    }
-  });
-
-  collector.on('end', async (_, reason) => {
-    if (reason === 'all_reacted') return;
-    clearTimeout(timer);
-    await finish();
+  activeChecks.set(msg.id, {
+    roleId: role.id,
+    guildId: interaction.guild.id,
+    channelId: interaction.channel.id,
+    reportSent: false,
+    timer,
   });
 }
