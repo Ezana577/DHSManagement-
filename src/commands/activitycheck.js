@@ -32,6 +32,9 @@ const COLOR  = 0x1d72d7;
 // In-memory map of msgId -> { ...record, timer }
 export const activeChecks = new Map();
 
+// Guards against sendReport firing twice (timer + reaction handler race).
+const inProgress = new Set();
+
 function parseTime(input) {
   const match = input.match(/^(\d+)(s|mi|h|d|mo|y)$/i);
   if (!match) return null;
