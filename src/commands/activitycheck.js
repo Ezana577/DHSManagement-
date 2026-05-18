@@ -29,7 +29,7 @@ const CHECK_EMOJI = '✅';
 const FOOTER = { text: 'Department of Homeland Security • Activity Check' };
 const COLOR  = 0x1d72d7;
 
-// In-memory map of msgId -> setTimeout handle.
+// In-memory map of msgId -> { ...record, timer }
 export const activeChecks = new Map();
 
 function parseTime(input) {
@@ -49,8 +49,8 @@ function parseTime(input) {
 }
 
 async function removeCheck(msgId) {
-  const timer = activeChecks.get(msgId);
-  if (timer) { clearTimeout(timer); activeChecks.delete(msgId); }
+  const check = activeChecks.get(msgId);
+  if (check) { clearTimeout(check.timer); activeChecks.delete(msgId); }
   db.data.checks = db.data.checks.filter((c) => c.msgId !== msgId);
   await db.write();
 }
@@ -118,7 +118,7 @@ export async function restoreChecks(client) {
       await sendReport(record.msgId, client);
     } else {
       const timer = setTimeout(() => sendReport(record.msgId, client), remaining);
-      activeChecks.set(record.msgId, timer);
+      activeChecks.set(record.msgId, { ...record, timer });
       console.log(`[ActivityCheck] Restored check msgId=${record.msgId} fires in ${Math.round(remaining / 1000)}s`);
     }
   }
@@ -170,8 +170,6 @@ export async function execute(interaction) {
     });
   }
 
-  // Acknowledge the interaction. If the token is already expired (10062) we still
-  // proceed — the check message gets sent regardless, we just cannot reply to the user.
   let interactionAlive = true;
   try {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -196,11 +194,13 @@ export async function execute(interaction) {
 
   // Persist to disk before scheduling — guarantees survival across restarts.
   const fireAt = Date.now() + durationMs;
-  db.data.checks.push({ msgId: msg.id, roleId: role.id, guildId: interaction.guild.id, channelId: interaction.channel.id, fireAt });
+  const record = { msgId: msg.id, roleId: role.id, guildId: interaction.guild.id, channelId: interaction.channel.id, fireAt };
+  db.data.checks.push(record);
   await db.write();
 
+  // Store the full record AND the timer so the reaction handler can access roleId.
   const timer = setTimeout(() => sendReport(msg.id, interaction.client), durationMs);
-  activeChecks.set(msg.id, timer);
+  activeChecks.set(msg.id, { ...record, timer });
 
   if (interactionAlive) {
     await interaction.deleteReply().catch(() => null);
