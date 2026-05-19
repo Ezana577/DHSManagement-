@@ -337,10 +337,10 @@ async function runDmFlow(user, rankId, onComplete) {
 
   const sessionAnswers = [...answers];
 
-  const collector = summaryMsg.createMessageComponentCollector({
-    filter: (i) => i.user.id === user.id,
-    time: 600_000,
-  });
+const collector = summaryMsg.createMessageComponentCollector({
+  filter: (i) => i.user.id === user.id,
+  time: 1_200_000,
+});
 
   return new Promise((resolve) => {
     collector.on('collect', async (i) => {
