@@ -17,8 +17,9 @@ export async function execute(message, prefixCommands) {
 
   if (!message.content.startsWith(prefix)) {
     const isMentioned =
-      message.mentions.has(message.client.user) &&
-      !message.mentions.everyone;
+  message.mentions.has(message.client.user) &&
+  !message.mentions.everyone &&
+  message.content.toLowerCase().includes('prefix');
 
     if (!isMentioned) return;
 

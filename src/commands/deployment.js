@@ -7,13 +7,18 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ActionRowBuilder,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   MessageFlags,
 } from 'discord.js';
 
 const ALLOWED_ROLE = '1426608758133358592';
+const BYPASS_ROLE = '1496312707907977387';
 const DEPLOYMENT_CHANNEL_ID = '1400527251748946031';
 const LOG_CHANNEL_ID = '1441817740791910551';
 const PING_ROLE_ID = '1447274909775691959';
+const COOLDOWN_MS = 2 * 60 * 60 * 1000;
+const BANNER_URL = 'https://media.discordapp.net/attachments/1400947813365584025/1519755229611036772/image.png';
 
 const END_ALLOWED_ROLES = [
   '1400533620610957493',
@@ -36,20 +41,49 @@ const IMPORTANT = [
   'Operate professionally at all times.',
 ].join('\n');
 
-function buildContainer(accentColor, statusLine, hostId, cohostId, note) {
-  const cohostLine = cohostId !== 'none' ? `<@${cohostId}>` : 'N/A';
+const cooldowns = new Map();
 
+function formatDuration(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const parts = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  parts.push(`${s}s`);
+  return parts.join(' ');
+}
+
+function buildActiveContainer(hostId, cohostId, note, startTs) {
+  const cohostLine = cohostId !== 'none' ? `<@${cohostId}>` : 'N/A';
   return new ContainerBuilder()
-    .setAccentColor(accentColor)
+    .setAccentColor(0x1d72d7)
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(BANNER_URL)
+      )
+    )
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`## ${statusLine}`)
+      new TextDisplayBuilder().setContent(`## [DHS] Deployment`)
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`<@&${PING_ROLE_ID}>`)
     )
     .addSeparatorComponents(
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Host:** <@${hostId}>\n**Co Host:** ${cohostLine}\n**Notes:** ${note}`
+        `**Host**\n<@${hostId}>\n\n**Co-Host**\n${cohostLine}\n\n**Status**\n🟢 Active`
+      )
+    )
+    .addSeparatorComponents(
+      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `**Notes**\n${note}\n\n**Started**\n<t:${startTs}:F>`
       )
     )
     .addSeparatorComponents(
@@ -72,8 +106,55 @@ function buildContainer(accentColor, statusLine, hostId, cohostId, note) {
     );
 }
 
-function buildCustomId(hostId, cohostId, note) {
-  const base = `deployment_end:${hostId}:${cohostId}:`;
+function buildEndedContainer(hostId, cohostId, note, startTs, endTs, attendees) {
+  const cohostLine = cohostId !== 'none' ? `<@${cohostId}>` : 'N/A';
+  const durationMs = (endTs - startTs) * 1000;
+  const duration = formatDuration(durationMs);
+
+  return new ContainerBuilder()
+    .setAccentColor(0xff0000)
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(BANNER_URL)
+      )
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`## [DHS] Deployment`)
+    )
+    .addSeparatorComponents(
+      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `**Host**\n<@${hostId}>\n\n**Co-Host**\n${cohostLine}\n\n**Status**\n🔴 Ended`
+      )
+    )
+    .addSeparatorComponents(
+      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `**Notes**\n${note}\n\n**Started**\n<t:${startTs}:F>\n\n**Ended**\n<t:${endTs}:F>`
+      )
+    )
+    .addSeparatorComponents(
+      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `**Deployment Statistics**\n• Duration: ${duration}\n• Attendees: ${attendees}\n• Status: Completed`
+      )
+    )
+    .addSeparatorComponents(
+      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`-# DHS System | Deployment`)
+    );
+}
+
+function buildCustomId(hostId, cohostId, note, startTs) {
+  const base = `deployment_end:${hostId}:${cohostId}:${startTs}:`;
   const maxNote = 100 - base.length;
   const safeNote = note.slice(0, maxNote);
   return `${base}${safeNote}`;
@@ -95,9 +176,25 @@ export async function execute(interaction) {
     return;
   }
 
+  const hasBypass = interaction.member.roles.cache.has(BYPASS_ROLE);
+  const userId = interaction.member.id;
+  const now = Date.now();
+
+  if (!hasBypass) {
+    const cd = cooldowns.get(userId);
+    if (cd && now < cd) {
+      const remainingTs = Math.floor(cd / 1000);
+      await interaction.reply({
+        content: `You may not host a deployment for <t:${remainingTs}:R>.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+  }
+
   const note = interaction.options.getString('note');
   const cohost = interaction.options.getUser('cohost');
-  const hostId = interaction.member.id;
+  const hostId = userId;
   const cohostId = cohost ? cohost.id : 'none';
 
   const channel = interaction.guild.channels.cache.get(DEPLOYMENT_CHANNEL_ID);
@@ -106,8 +203,9 @@ export async function execute(interaction) {
     return;
   }
 
-  const customId = buildCustomId(hostId, cohostId, note);
-  const container = buildContainer(0x1d72d7, 'A deployment has been started', hostId, cohostId, note);
+  const startTs = Math.floor(now / 1000);
+  const customId = buildCustomId(hostId, cohostId, note, startTs);
+  const container = buildActiveContainer(hostId, cohostId, note, startTs);
 
   container.addActionRowComponents(
     new ActionRowBuilder().addComponents(
@@ -118,35 +216,33 @@ export async function execute(interaction) {
     )
   );
 
-  await channel.send({
-    content: `<@&${PING_ROLE_ID}>`,
+  const sent = await channel.send({
+    components: [container],
+    flags: MessageFlags.IsComponentsV2,
     allowedMentions: { roles: [PING_ROLE_ID] },
   });
 
-  await channel.send({
-    components: [container],
-    flags: MessageFlags.IsComponentsV2,
-    allowedMentions: { parse: [] },
-  });
+  await sent.react('✅');
 
   await interaction.reply({ content: `Deployment started in ${channel}.`, flags: MessageFlags.Ephemeral });
 }
 
 export const buttons = {
   deployment_end: async (interaction) => {
-    const ended = interaction.message.components?.[0]?.components?.some(
-      (c) => c.type === 10 && c.content === '## The deployment has ended'
-    );
-
-    if (ended) {
-      await interaction.reply({ content: 'This deployment has already ended.', flags: MessageFlags.Ephemeral });
-      return;
-    }
-
     const parts = interaction.customId.split(':');
     const hostId = parts[1];
     const cohostId = parts[2];
-    const note = parts.slice(3).join(':');
+    const startTs = parseInt(parts[3], 10);
+    const note = parts.slice(4).join(':');
+
+    const isEnded = interaction.message.components?.[0]?.components?.some(
+      (c) => c.type === 10 && c.content?.includes('🔴 Ended')
+    );
+
+    if (isEnded) {
+      await interaction.reply({ content: 'This deployment has already ended.', flags: MessageFlags.Ephemeral });
+      return;
+    }
 
     const member = interaction.member;
     const hasRole = END_ALLOWED_ROLES.some((id) => member.roles.cache.has(id));
@@ -160,7 +256,32 @@ export const buttons = {
 
     await interaction.deferUpdate();
 
-    const endedContainer = buildContainer(0xff0000, 'The deployment has ended', hostId, cohostId, note);
+    const endTs = Math.floor(Date.now() / 1000);
+
+    cooldowns.set(hostId, Date.now() + COOLDOWN_MS);
+    if (cohostId !== 'none') cooldowns.set(cohostId, Date.now() + COOLDOWN_MS);
+
+    const message = interaction.message;
+    let attendees = 0;
+    try {
+      const reaction = message.reactions.cache.get('✅');
+      if (reaction) {
+        const users = await reaction.users.fetch();
+        attendees = users.filter((u) => !u.bot).size;
+      }
+    } catch {}
+
+    const endedContainer = buildEndedContainer(hostId, cohostId, note, startTs, endTs, attendees);
+
+    endedContainer.addActionRowComponents(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('deployment_ended_disabled')
+          .setLabel('Deployment Ended')
+          .setStyle(ButtonStyle.Danger)
+          .setDisabled(true)
+      )
+    );
 
     await interaction.editReply({
       components: [endedContainer],
@@ -169,8 +290,9 @@ export const buttons = {
 
     const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
     if (logChannel && logChannel.isTextBased()) {
-      const timestamp = `<t:${Math.floor(Date.now() / 1000)}:F>`;
-      const cohostLine = cohostId !== 'none' ? `<@${cohostId}>` : null;
+      const durationMs = (endTs - startTs) * 1000;
+      const duration = formatDuration(durationMs);
+      const cohostLine = cohostId !== 'none' ? `<@${cohostId}>` : 'N/A';
 
       const logContainer = new ContainerBuilder()
         .setAccentColor(0xff0000)
@@ -182,10 +304,7 @@ export const buttons = {
         )
         .addTextDisplayComponents(
           new TextDisplayBuilder().setContent(
-            `**Host:** <@${hostId}>\n` +
-            (cohostLine ? `**Co Host:** ${cohostLine}\n` : '') +
-            `**Note:** ${note}\n` +
-            `**Timestamp:** ${timestamp}`
+            `**Host:** <@${hostId}>\n**Co-Host:** ${cohostLine}\n**Note:** ${note}\n**Started:** <t:${startTs}:F>\n**Ended:** <t:${endTs}:F>\n**Duration:** ${duration}\n**Attendees:** ${attendees}`
           )
         )
         .addSeparatorComponents(
