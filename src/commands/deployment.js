@@ -14,7 +14,7 @@ import {
 
 const ALLOWED_ROLE = '1426608758133358592';
 const BYPASS_ROLE = '1496312707907977387';
-const DEPLOYMENT_CHANNEL_ID = '1400527251748946031';
+const DEPLOYMENT_CHANNEL_ID = '1400947813365584025';
 const LOG_CHANNEL_ID = '1441817740791910551';
 const PING_ROLE_ID = '1447274909775691959';
 const COOLDOWN_MS = 2 * 60 * 60 * 1000;
@@ -59,11 +59,6 @@ function buildActiveContainer(hostId, cohostId, note, startTs) {
   const cohostLine = cohostId !== 'none' ? `<@${cohostId}>` : 'N/A';
   return new ContainerBuilder()
     .setAccentColor(0x1d72d7)
-    .addMediaGalleryComponents(
-      new MediaGalleryBuilder().addItems(
-        new MediaGalleryItemBuilder().setURL(BANNER_URL)
-      )
-    )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`## [DHS] Deployment`)
     )
@@ -75,7 +70,7 @@ function buildActiveContainer(hostId, cohostId, note, startTs) {
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Host**\n<@${hostId}>\n\n**Co-Host**\n${cohostLine}\n\n**Status**\n🟢 Active`
+        `**Host:** <@${hostId}> **|** **Co-Host:** ${cohostLine} **|** **Status:** 🟢 Active`
       )
     )
     .addSeparatorComponents(
@@ -83,7 +78,7 @@ function buildActiveContainer(hostId, cohostId, note, startTs) {
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Notes**\n${note}\n\n**Started**\n<t:${startTs}:F>`
+        `**Notes:** ${note}\n**Started:** <t:${startTs}:F>`
       )
     )
     .addSeparatorComponents(
@@ -101,6 +96,11 @@ function buildActiveContainer(hostId, cohostId, note, startTs) {
     .addSeparatorComponents(
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
     )
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(BANNER_URL)
+      )
+    )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`-# DHS System | Deployment`)
     );
@@ -113,11 +113,6 @@ function buildEndedContainer(hostId, cohostId, note, startTs, endTs, attendees) 
 
   return new ContainerBuilder()
     .setAccentColor(0xff0000)
-    .addMediaGalleryComponents(
-      new MediaGalleryBuilder().addItems(
-        new MediaGalleryItemBuilder().setURL(BANNER_URL)
-      )
-    )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`## [DHS] Deployment`)
     )
@@ -126,7 +121,7 @@ function buildEndedContainer(hostId, cohostId, note, startTs, endTs, attendees) 
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Host**\n<@${hostId}>\n\n**Co-Host**\n${cohostLine}\n\n**Status**\n🔴 Ended`
+        `**Host:** <@${hostId}> **|** **Co-Host:** ${cohostLine} **|** **Status:** 🔴 Ended`
       )
     )
     .addSeparatorComponents(
@@ -134,7 +129,7 @@ function buildEndedContainer(hostId, cohostId, note, startTs, endTs, attendees) 
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Notes**\n${note}\n\n**Started**\n<t:${startTs}:F>\n\n**Ended**\n<t:${endTs}:F>`
+        `**Notes:** ${note}\n**Started:** <t:${startTs}:F>\n**Ended:** <t:${endTs}:F>`
       )
     )
     .addSeparatorComponents(
@@ -147,6 +142,11 @@ function buildEndedContainer(hostId, cohostId, note, startTs, endTs, attendees) 
     )
     .addSeparatorComponents(
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+    )
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(BANNER_URL)
+      )
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`-# DHS System | Deployment`)
@@ -222,7 +222,7 @@ export async function execute(interaction) {
     allowedMentions: { roles: [PING_ROLE_ID] },
   });
 
-  await sent.react('✅');
+  await sent.react('✓⃝');
 
   await interaction.reply({ content: `Deployment started in ${channel}.`, flags: MessageFlags.Ephemeral });
 }
