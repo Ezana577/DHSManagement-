@@ -14,7 +14,7 @@ import {
 
 const ALLOWED_ROLE = '1426608758133358592';
 const BYPASS_ROLE = '1496312707907977387';
-const DEPLOYMENT_CHANNEL_ID = '1441817740791910551';
+const DEPLOYMENT_CHANNEL_ID = '1400527251748946031';
 const LOG_CHANNEL_ID = '1441817740791910551';
 const PING_ROLE_ID = '1447274909775691959';
 const COOLDOWN_MS = 2 * 60 * 60 * 1000;
@@ -61,7 +61,7 @@ function buildActiveContainer(hostId, cohostId, note, startTs) {
   return new ContainerBuilder()
     .setAccentColor(0x1d72d7)
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`## ${DHS_EMOJI} Deployment`)
+      new TextDisplayBuilder().setContent(`${DHS_EMOJI} **Deployment**`)
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`<@&${PING_ROLE_ID}>`)
@@ -71,7 +71,7 @@ function buildActiveContainer(hostId, cohostId, note, startTs) {
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Host**\n<@${hostId}>\n\n**Co-Host**\n${cohostLine}\n\n**Status**\nActive`
+        `**Host:** <@${hostId}>\n**Co-Host:** ${cohostLine}\n**Status:** Active`
       )
     )
     .addSeparatorComponents(
@@ -79,7 +79,7 @@ function buildActiveContainer(hostId, cohostId, note, startTs) {
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Notes**\n${note}\n\n**Started**\n<t:${startTs}:F>`
+        `**Notes:** ${note}\n**Started:** <t:${startTs}:F>`
       )
     )
     .addSeparatorComponents(
@@ -115,14 +115,14 @@ function buildEndedContainer(hostId, cohostId, note, startTs, endTs, attendees) 
   return new ContainerBuilder()
     .setAccentColor(0xff0000)
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`## ${DHS_EMOJI} Deployment`)
+      new TextDisplayBuilder().setContent(`${DHS_EMOJI} **Deployment**`)
     )
     .addSeparatorComponents(
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Host**\n<@${hostId}>\n\n**Co-Host**\n${cohostLine}\n\n**Status**\nEnded`
+        `**Host:** <@${hostId}>\n**Co-Host:** ${cohostLine}\n**Status:** Ended`
       )
     )
     .addSeparatorComponents(
@@ -130,7 +130,7 @@ function buildEndedContainer(hostId, cohostId, note, startTs, endTs, attendees) 
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Notes**\n${note}\n\n**Started**\n<t:${startTs}:F>\n\n**Ended**\n<t:${endTs}:F>`
+        `**Notes:** ${note}\n**Started:** <t:${startTs}:F>\n**Ended:** <t:${endTs}:F>`
       )
     )
     .addSeparatorComponents(
@@ -138,7 +138,7 @@ function buildEndedContainer(hostId, cohostId, note, startTs, endTs, attendees) 
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Deployment Statistics**\n• Duration: ${duration}\n• Attendees: ${attendees}\n• Status: Completed`
+        `**Duration:** ${duration}\n**Attendees:** ${attendees}\n**Status:** Completed`
       )
     )
     .addSeparatorComponents(
@@ -237,7 +237,7 @@ export const buttons = {
     const note = parts.slice(4).join(':');
 
     const isEnded = interaction.message.components?.[0]?.components?.some(
-      (c) => c.type === 10 && c.content?.includes('Status**\nEnded')
+      (c) => c.type === 10 && c.content?.includes('Status:** Ended')
     );
 
     if (isEnded) {
@@ -286,11 +286,7 @@ export const buttons = {
           .setCustomId('deployment_ended_disabled')
           .setLabel('Deployment Ended')
           .setStyle(ButtonStyle.Danger)
-          .setDisabled(true),
-        new ButtonBuilder()
-          .setCustomId(attendeeCustomId)
-          .setLabel('View Attendees')
-          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true)
       )
     );
 
@@ -323,6 +319,14 @@ export const buttons = {
         )
         .addTextDisplayComponents(
           new TextDisplayBuilder().setContent(`-# DHS System | Deployment`)
+        )
+        .addActionRowComponents(
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(attendeeCustomId)
+              .setLabel('View Attendees')
+              .setStyle(ButtonStyle.Secondary)
+          )
         );
 
       await logChannel.send({
