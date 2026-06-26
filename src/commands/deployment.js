@@ -14,11 +14,12 @@ import {
 
 const ALLOWED_ROLE = '1426608758133358592';
 const BYPASS_ROLE = '1496312707907977387';
-const DEPLOYMENT_CHANNEL_ID = '1400947813365584025';
+const DEPLOYMENT_CHANNEL_ID = '1400527251748946031';
 const LOG_CHANNEL_ID = '1441817740791910551';
 const PING_ROLE_ID = '1447274909775691959';
 const COOLDOWN_MS = 2 * 60 * 60 * 1000;
 const BANNER_URL = 'https://media.discordapp.net/attachments/1400947813365584025/1519755229611036772/image.png';
+const DHS_EMOJI = '<:DHS:1498034960639197335>';
 
 const END_ALLOWED_ROLES = [
   '1400533620610957493',
@@ -60,7 +61,7 @@ function buildActiveContainer(hostId, cohostId, note, startTs) {
   return new ContainerBuilder()
     .setAccentColor(0x1d72d7)
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`## [DHS] Deployment`)
+      new TextDisplayBuilder().setContent(`## ${DHS_EMOJI} Deployment`)
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`<@&${PING_ROLE_ID}>`)
@@ -70,7 +71,7 @@ function buildActiveContainer(hostId, cohostId, note, startTs) {
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Host:** <@${hostId}> **|** **Co-Host:** ${cohostLine} **|** **Status:** 🟢 Active`
+        `**Host**\n<@${hostId}>\n\n**Co-Host**\n${cohostLine}\n\n**Status**\nActive`
       )
     )
     .addSeparatorComponents(
@@ -78,7 +79,7 @@ function buildActiveContainer(hostId, cohostId, note, startTs) {
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Notes:** ${note}\n**Started:** <t:${startTs}:F>`
+        `**Notes**\n${note}\n\n**Started**\n<t:${startTs}:F>`
       )
     )
     .addSeparatorComponents(
@@ -114,14 +115,14 @@ function buildEndedContainer(hostId, cohostId, note, startTs, endTs, attendees) 
   return new ContainerBuilder()
     .setAccentColor(0xff0000)
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`## [DHS] Deployment`)
+      new TextDisplayBuilder().setContent(`## ${DHS_EMOJI} Deployment`)
     )
     .addSeparatorComponents(
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Host:** <@${hostId}> **|** **Co-Host:** ${cohostLine} **|** **Status:** 🔴 Ended`
+        `**Host**\n<@${hostId}>\n\n**Co-Host**\n${cohostLine}\n\n**Status**\nEnded`
       )
     )
     .addSeparatorComponents(
@@ -129,7 +130,7 @@ function buildEndedContainer(hostId, cohostId, note, startTs, endTs, attendees) 
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Notes:** ${note}\n**Started:** <t:${startTs}:F>\n**Ended:** <t:${endTs}:F>`
+        `**Notes**\n${note}\n\n**Started**\n<t:${startTs}:F>\n\n**Ended**\n<t:${endTs}:F>`
       )
     )
     .addSeparatorComponents(
@@ -222,7 +223,7 @@ export async function execute(interaction) {
     allowedMentions: { roles: [PING_ROLE_ID] },
   });
 
-  await sent.react('✓⃝');
+  await sent.react('✅');
 
   await interaction.reply({ content: `Deployment started in ${channel}.`, flags: MessageFlags.Ephemeral });
 }
@@ -236,7 +237,7 @@ export const buttons = {
     const note = parts.slice(4).join(':');
 
     const isEnded = interaction.message.components?.[0]?.components?.some(
-      (c) => c.type === 10 && c.content?.includes('🔴 Ended')
+      (c) => c.type === 10 && c.content?.includes('Status**\nEnded')
     );
 
     if (isEnded) {
@@ -263,13 +264,19 @@ export const buttons = {
 
     const message = interaction.message;
     let attendees = 0;
+    const attendeeIds = [];
     try {
       const reaction = message.reactions.cache.get('✅');
       if (reaction) {
         const users = await reaction.users.fetch();
-        attendees = users.filter((u) => !u.bot).size;
+        const nonBots = users.filter((u) => !u.bot);
+        attendees = nonBots.size;
+        nonBots.forEach((u) => attendeeIds.push(u.id));
       }
     } catch {}
+
+    const messageLink = `https://discord.com/channels/${interaction.guild.id}/${message.channel.id}/${message.id}`;
+    const attendeeCustomId = `deployment_attendees:${attendeeIds.join(',')}`;
 
     const endedContainer = buildEndedContainer(hostId, cohostId, note, startTs, endTs, attendees);
 
@@ -279,7 +286,11 @@ export const buttons = {
           .setCustomId('deployment_ended_disabled')
           .setLabel('Deployment Ended')
           .setStyle(ButtonStyle.Danger)
-          .setDisabled(true)
+          .setDisabled(true),
+        new ButtonBuilder()
+          .setCustomId(attendeeCustomId)
+          .setLabel('View Attendees')
+          .setStyle(ButtonStyle.Secondary)
       )
     );
 
@@ -304,7 +315,7 @@ export const buttons = {
         )
         .addTextDisplayComponents(
           new TextDisplayBuilder().setContent(
-            `**Host:** <@${hostId}>\n**Co-Host:** ${cohostLine}\n**Note:** ${note}\n**Started:** <t:${startTs}:F>\n**Ended:** <t:${endTs}:F>\n**Duration:** ${duration}\n**Attendees:** ${attendees}`
+            `**Host:** <@${hostId}>\n**Co-Host:** ${cohostLine}\n**Note:** ${note}\n**Started:** <t:${startTs}:F>\n**Ended:** <t:${endTs}:F>\n**Duration:** ${duration}\n**Attendees:** ${attendees}\n**Deployment Link:** ${messageLink}`
           )
         )
         .addSeparatorComponents(
@@ -320,5 +331,22 @@ export const buttons = {
         allowedMentions: { parse: [] },
       });
     }
+  },
+
+  deployment_attendees: async (interaction) => {
+    const idsPart = interaction.customId.slice('deployment_attendees:'.length);
+    const ids = idsPart ? idsPart.split(',').filter(Boolean) : [];
+
+    if (ids.length === 0) {
+      await interaction.reply({ content: 'No attendees were logged for this deployment.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const list = ids.map((id, i) => `${i + 1}. <@${id}>`).join('\n');
+    await interaction.reply({
+      content: `**Attendees (${ids.length})**\n${list}`,
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [] },
+    });
   },
 };
