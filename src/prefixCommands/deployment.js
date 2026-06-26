@@ -19,6 +19,7 @@ const DEPLOYMENT_CHANNEL_ID = '1400527251748946031';
 const PING_ROLE_ID = '1447274909775691959';
 const COOLDOWN_MS = 2 * 60 * 60 * 1000;
 const BANNER_URL = 'https://media.discordapp.net/attachments/1400947813365584025/1519755229611036772/image.png';
+const DHS_EMOJI = '<:DHS:1498034960639197335>';
 
 const REQUIREMENTS = [
   '• Maintain professionalism at all times',
@@ -108,13 +109,8 @@ export async function execute(message, args) {
 
   const container = new ContainerBuilder()
     .setAccentColor(0x1d72d7)
-    .addMediaGalleryComponents(
-      new MediaGalleryBuilder().addItems(
-        new MediaGalleryItemBuilder().setURL(BANNER_URL)
-      )
-    )
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`## [DHS] Deployment`)
+      new TextDisplayBuilder().setContent(`## ${DHS_EMOJI} Deployment`)
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`<@&${PING_ROLE_ID}>`)
@@ -124,7 +120,7 @@ export async function execute(message, args) {
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `**Host**\n<@${hostId}>\n\n**Co-Host**\n${cohostLine}\n\n**Status**\n🟢 Active`
+        `**Host**\n<@${hostId}>\n\n**Co-Host**\n${cohostLine}\n\n**Status**\nActive`
       )
     )
     .addSeparatorComponents(
@@ -149,6 +145,11 @@ export async function execute(message, args) {
     )
     .addSeparatorComponents(
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+    )
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(BANNER_URL)
+      )
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`-# DHS System | Deployment`)
