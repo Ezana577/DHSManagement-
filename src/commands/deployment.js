@@ -19,7 +19,7 @@ const LOG_CHANNEL_ID = '1441817740791910551';
 const PING_ROLE_ID = '1447274909775691959';
 const COOLDOWN_MS = 2 * 60 * 60 * 1000;
 const BANNER_URL = 'https://media.discordapp.net/attachments/1400947813365584025/1519755229611036772/image.png';
-const DHS_EMOJI = '<:DHS:1498034960639197335>';
+const DHS_EMOJI = '<:DHS:1520047343016087633>';
 
 const END_ALLOWED_ROLES = [
   '1400533620610957493',
@@ -61,7 +61,7 @@ function buildActiveContainer(hostId, cohostId, note, startTs) {
   return new ContainerBuilder()
     .setAccentColor(0x1d72d7)
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`${DHS_EMOJI} **Deployment**`)
+      new TextDisplayBuilder().setContent(`## ${DHS_EMOJI} Deployment`)
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`<@&${PING_ROLE_ID}>`)
@@ -115,7 +115,7 @@ function buildEndedContainer(hostId, cohostId, note, startTs, endTs, attendees) 
   return new ContainerBuilder()
     .setAccentColor(0xff0000)
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`${DHS_EMOJI} **Deployment**`)
+      new TextDisplayBuilder().setContent(`## ${DHS_EMOJI} Deployment`)
     )
     .addSeparatorComponents(
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
