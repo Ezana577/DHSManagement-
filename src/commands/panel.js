@@ -49,7 +49,7 @@ function buildPanelEmbed() {
     return new EmbedBuilder()
         .setColor(EMBED_COLOR)
      .setDescription(
-`# Department Of Homeland Security
+`# Department Of Homeland Security support center!
 
 > Welcome to the Department of Homeland Security Support Center. Please select the category below that best matches your request.`
 )
@@ -70,7 +70,7 @@ function buildPanelEmbed() {
                 inline: false
             },
             {
-                name: 'Warning',
+                name: '‼️ Warning',
                 value: ' > -# Please do not submit false, duplicate, or troll tickets. Abuse may result in a Ticket Blacklist or disciplinary action.',
                 inline: false
             }
