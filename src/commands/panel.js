@@ -32,15 +32,15 @@ export const data = new SlashCommandBuilder()
             )
     )
     .addSubcommand(sub =>
-        sub.setName('switch').setDescription('Switch the category of this ticket (HR+). Resends the category embed.')
+        sub.setName('switch').setDescription('Switch the category of this ticket.')
             .addStringOption(opt =>
                 opt.setName('category')
                     .setDescription('Category to switch this ticket to.')
                     .setRequired(true)
                     .addChoices(
-                        { name: 'General Inquiries', value: 'general' },
-                        { name: 'Appeal Inquiries',  value: 'appeal'  },
-                        { name: 'Report Inquiries',  value: 'report'  }
+                        { name: "❓ General Inquiry's", value: 'general' },
+                        { name: "📄 Appeal Inquiry's",  value: 'appeal'  },
+                        { name: "🚨 Report Inquiry's",  value: 'report'  }
                     )
             )
     );
@@ -48,34 +48,35 @@ export const data = new SlashCommandBuilder()
 function buildPanelEmbed() {
     return new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle('<:DHS:1520047343016087633> • Department Of Homeland Security')
+        .setTitle('# Department Of Homeland Security')
         .setDescription(
             'Welcome to the Department of Homeland Security Support Center. ' +
             'Please select the category below that best matches your request.'
         )
         .addFields(
             {
-                name: 'General Inquiries',
-                value: '- Questions or concerns\n- Redeem a prize\n- General assistance',
+                name: '❓ General Inquiries',
+                value: '> • Questions or concerns\n> • Redeem a prize\n> • General assistance',
                 inline: false
             },
             {
-                name: 'Appeals',
-                value: '- Appeal a punishment\n- Appeal a Ticket Blacklist\n- Request a case review',
+                name: '📄 Appeals',
+                value: '> • Appeal a punishment\n> • Appeal a Ticket Blacklist\n> • Request a case review',
                 inline: false
             },
             {
-                name: 'Reports',
-                value: '- Report an agent\n- Report misconduct\n- Submit supporting evidence',
+                name: '🚨 Reports',
+                value: '> • Report an agent\n> • Report misconduct\n> • Submit supporting evidence',
                 inline: false
             },
             {
-                name: 'Warning',
+                name: '⚠️ Warning',
                 value: 'Please do not submit false, duplicate, or troll tickets. Abuse may result in a Ticket Blacklist or disciplinary action.',
                 inline: false
             }
         )
-        .setImage(PANEL_BANNER);
+        .setImage(PANEL_BANNER)
+        .setFooter({ text: 'DHS | Support System' });
 }
 
 function buildPanelDropdown() {
@@ -119,7 +120,6 @@ export async function execute(interaction) {
             components: [buildPanelDropdown()]
         });
 
-        // Persist panel message ID
         await supabase.from('panels').upsert({
             guild_id:   interaction.guildId,
             channel_id: interaction.channelId,
@@ -162,14 +162,14 @@ export async function execute(interaction) {
     }
 
     // ── /panel switch ─────────────────────────────────────────
-    // Changes the global default panel category for future tickets only.
-    // HR+ only. Does NOT affect existing tickets.
+    // HR+ only. Changes the active category for NEW tickets only.
+    // Does NOT affect any existing open tickets.
     if (sub === 'switch') {
         await interaction.deferReply({ ephemeral: true });
 
         const category = interaction.options.getString('category');
 
-        // Fetch current setting to block switching to same category
+        // Block switching to the same category that's already active
         const { data: current } = await supabase
             .from('panel_settings')
             .select('default_category')
@@ -182,7 +182,8 @@ export async function execute(interaction) {
                     new EmbedBuilder()
                         .setColor(0xe74c3c)
                         .setTitle('No Change')
-                        .setDescription(`The panel is already set to **${category}**.`)
+                        .setDescription(`The panel is already set to **${categoryLabel(category)}**.`)
+                        .setFooter({ text: 'DHS | Support System' })
                 ]
             });
         }
@@ -194,12 +195,7 @@ export async function execute(interaction) {
             updated_at:       new Date().toISOString()
         }, { onConflict: 'guild_id' });
 
-        const categoryLabels = {
-            general: "General Inquiry's",
-            appeal:  "Appeal Inquiry's",
-            report:  "Report Inquiry's"
-        };
-        const label = categoryLabels[category] ?? category;
+        const label = categoryLabel(category);
 
         await logAction(interaction.client, {
             action:   'Panel Switch',
@@ -216,22 +212,30 @@ export async function execute(interaction) {
                         `This ticket panel has been switched to: **${label}**\n` +
                         `Switched by: <@${interaction.user.id}>`
                     )
-                    .setFooter({ text: 'This affects new tickets only. Existing tickets are not changed.' })
+                    .setFooter({ text: 'DHS | Support System' })
             ]
         });
     }
 }
 
-// ── Dropdown handler (registered via buttons map in index.js) ──
+function categoryLabel(value) {
+    return {
+        general: "❓ General Inquiry's",
+        appeal:  "📄 Appeal Inquiry's",
+        report:  "🚨 Report Inquiry's"
+    }[value] ?? value;
+}
+
+// ── Dropdown handler ───────────────────────────────────────────
 export const buttons = {
     'ticket:panel:select': async (interaction) => {
         await interaction.deferReply({ ephemeral: true });
 
-        const category = interaction.values[0]; // 'general' | 'appeal' | 'report'
+        const category = interaction.values[0];
         const guild    = interaction.guild;
         const opener   = interaction.user;
 
-        // ── Blacklist check ───────────────────────────────────
+        // Blacklist check
         const { data: blacklist } = await supabase
             .from('blacklists')
             .select('id')
@@ -247,11 +251,12 @@ export const buttons = {
                         .setColor(0xe74c3c)
                         .setTitle('Access Denied')
                         .setDescription('You are currently blacklisted from opening tickets.')
+                        .setFooter({ text: 'DHS | Support System' })
                 ]
             });
         }
 
-        // ── Duplicate open ticket check ───────────────────────
+        // Duplicate open ticket check
         const { data: existingTickets } = await supabase
             .from('tickets')
             .select('channel_id')
@@ -266,11 +271,12 @@ export const buttons = {
                         .setColor(0xe74c3c)
                         .setTitle('Ticket Already Open')
                         .setDescription(`You already have an open ticket: <#${existingTickets[0].channel_id}>`)
+                        .setFooter({ text: 'DHS | Support System' })
                 ]
             });
         }
 
-        // ── Get next ticket number via RPC ────────────────────
+        // Get next ticket number via RPC
         const { data: ticketNum, error: numErr } = await supabase
             .rpc('increment_ticket_counter', { p_guild_id: guild.id });
 
@@ -279,14 +285,12 @@ export const buttons = {
             return interaction.editReply({ content: 'Failed to create ticket. Please try again.' });
         }
 
-        const ticketId   = `ticket-${ticketNum}`;
+        const ticketId    = `ticket-${ticketNum}`;
         const channelName = `ticket-${ticketNum}`;
 
-        // ── Build permission overwrites ───────────────────────
         const { buildTicketOverwrites, buildGeneralEmbed, buildReportEmbed, buildAppealEmbed } = await import('../utils/ticketHelpers.js');
         const overwrites = buildTicketOverwrites(guild, opener.id);
 
-        // ── Create the channel ────────────────────────────────
         const ticketChannel = await guild.channels.create({
             name:                 channelName,
             parent:               process.env[`TICKET_CATEGORY_${category.toUpperCase()}`] || null,
@@ -301,45 +305,41 @@ export const buttons = {
             return interaction.editReply({ content: 'Failed to create ticket channel. Check bot permissions.' });
         }
 
-        // ── Send category-specific embed ──────────────────────
         let openEmbed;
-        if (category === 'general') openEmbed = buildGeneralEmbed();
-        else if (category === 'report') openEmbed = buildReportEmbed();
-        else openEmbed = buildAppealEmbed();
+        if (category === 'general')      openEmbed = buildGeneralEmbed();
+        else if (category === 'report')  openEmbed = buildReportEmbed();
+        else                             openEmbed = buildAppealEmbed();
 
         await ticketChannel.send({
             content: `<@${opener.id}>`,
             embeds: [openEmbed]
         });
 
-        // ── Store in Supabase ─────────────────────────────────
-        const { data: ticket, error: dbErr } = await supabase
+        const { error: dbErr } = await supabase
             .from('tickets')
             .insert({
-                guild_id:    guild.id,
-                channel_id:  ticketChannel.id,
-                owner_id:    opener.id,
+                guild_id:   guild.id,
+                channel_id: ticketChannel.id,
+                owner_id:   opener.id,
                 category,
-                status:      'open',
-                ticket_id:   ticketId,
-                ticket_num:  ticketNum,
-                claimed_by:  null,
-                opened_at:   new Date().toISOString()
-            })
-            .select()
-            .single();
+                status:     'open',
+                ticket_id:  ticketId,
+                ticket_num: ticketNum,
+                claimed_by: null,
+                opened_at:  new Date().toISOString()
+            });
 
         if (dbErr) {
             console.error('[DHS Tickets] Supabase insert error:', dbErr);
         }
 
-        // ── Ephemeral confirmation ────────────────────────────
         return interaction.editReply({
             embeds: [
                 new EmbedBuilder()
                     .setColor(EMBED_COLOR)
                     .setTitle('Ticket')
                     .setDescription(`Opened a new ticket ${ticketId}`)
+                    .setFooter({ text: 'DHS | Support System' })
             ]
         });
     }
