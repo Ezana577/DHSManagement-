@@ -26,7 +26,7 @@ export const data = new SlashCommandBuilder()
         sub.setName('send').setDescription('Send the ticket panel to this channel.')
     )
     .addSubcommand(sub =>
-        sub.setName('edit').setDescription('Edit the existing ticket panel (no duplicates).')
+        sub.setName('edit').setDescription('Edit the existing ticket panel.')
             .addStringOption(opt =>
                 opt.setName('message_id').setDescription('Message ID of the existing panel.').setRequired(true)
             )
