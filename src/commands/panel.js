@@ -49,7 +49,7 @@ function buildPanelEmbed() {
     return new EmbedBuilder()
         .setColor(EMBED_COLOR)
      .setDescription(
-`# Department Of Homeland Security support center!
+`# Department Of Homeland Security Scupport Center!
 
 > Welcome to the Department of Homeland Security Support Center. Please select the category below that best matches your request.`
 )
