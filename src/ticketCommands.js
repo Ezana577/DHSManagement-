@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  DHS TICKET SYSTEM — ALL COMMANDS IN ONE FILE
 //  Commands: /add /blacklist /claim /unclaim /close /closerequest
-//            /panel /remove /rename /transfer /jump
+//            /panel /remove /rename /transfer /jump /config
 //
 //  Usage in index.js — instead of loading a folder, import this file:
 //
@@ -13,6 +13,22 @@
 //        if (cmd.modals)   for (const [id, h] of Object.entries(cmd.modals))   client.modals.set(id, h);
 //        if (cmd.selectMenus) for (const [id, h] of Object.entries(cmd.selectMenus)) client.selectMenus.set(id, h);
 //    }
+//
+//  ENV VARS expected:
+//    ROLE_HR, ROLE_SHR, ROLE_LS, ROLE_EXEC
+//    TICKET_CATEGORY_GENERAL, TICKET_CATEGORY_APPEAL, TICKET_CATEGORY_REPORT
+//    LOG_CHANNEL_ID, CLOSE_LOG_CHANNEL_ID
+//    SUPABASE_URL, SUPABASE_SERVICE_KEY
+//
+//  SUPABASE — new table required for /config:
+//    create table command_permissions (
+//      guild_id      text not null,
+//      command_name  text not null,
+//      role_id       text not null,
+//      added_by      text,
+//      added_at      timestamptz default now(),
+//      primary key (guild_id, command_name, role_id)
+//    );
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import {
@@ -26,6 +42,7 @@ import {
     TextInputStyle,
     StringSelectMenuBuilder,
     StringSelectMenuOptionBuilder,
+    RoleSelectMenuBuilder,
     PermissionFlagsBits,
     ChannelType,
     AttachmentBuilder,
@@ -41,11 +58,87 @@ const PANEL_BANNER        = 'https://cdn.discordapp.com/attachments/140094781336
 const LOG_CHANNEL_ID      = process.env.LOG_CHANNEL_ID       || '1400610140406808768';
 const CLOSE_LOG_CHANNEL   = process.env.CLOSE_LOG_CHANNEL_ID || '1400610094412070934';
 
-// ─── Permissions ──────────────────────────────────────────────────────────────
+// ─── Category metadata (shared by panel send + panel switch) ──────────────────
+const CATEGORY_TITLES = {
+    general: "❓ General Inquiry's",
+    appeal:  "📄 Appeal Inquiry's",
+    report:  "🚨 Report Inquiry's",
+};
+const CATEGORY_LABELS = {
+    general: "❓ General Inquiry's",
+    appeal:  "📄 Appeal Inquiry's",
+    report:  "🚨 Report Inquiry's",
+};
+
+// ─── Permissions (chain of command: Executive > LS > SHR > HR) ────────────────
 function hasRole(member, ...ids) { return ids.some(id => id && member.roles.cache.has(id)); }
-function isLS(member)  { return hasRole(member, process.env.ROLE_LS); }
-function isSHR(member) { return hasRole(member, process.env.ROLE_LS, process.env.ROLE_SHR); }
-function isHR(member)  { return hasRole(member, process.env.ROLE_LS, process.env.ROLE_SHR, process.env.ROLE_HR); }
+function isExec(member) { return hasRole(member, process.env.ROLE_EXEC); }
+function isLS(member)   { return hasRole(member, process.env.ROLE_EXEC, process.env.ROLE_LS); }
+function isSHR(member)  { return hasRole(member, process.env.ROLE_EXEC, process.env.ROLE_LS, process.env.ROLE_SHR); }
+function isHR(member)   { return hasRole(member, process.env.ROLE_EXEC, process.env.ROLE_LS, process.env.ROLE_SHR, process.env.ROLE_HR); }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  DYNAMIC PER-COMMAND PERMISSIONS  (powers /config)
+//
+//  Every gated command/button checks `canUseCommand(guildId, commandName, member)`
+//  instead of a hardcoded isHR/isSHR call. If no custom roles have been
+//  configured for a command (table empty for that guild+command), it falls
+//  back to a sensible default tier. Executives can always use every command
+//  regardless of configuration, since they sit at the top of the chain.
+// ═══════════════════════════════════════════════════════════════════════════════
+// Note: /panel is split into three separate config keys (panel_send, panel_edit,
+// panel_switch) rather than one lumped "panel" entry, because the edit-lock
+// below applies ONLY to panel_send and panel_edit — panel_switch is editable
+// by SHR+ like every other command.
+const COMMAND_LIST = ['add', 'blacklist', 'claim', 'unclaim', 'close', 'closerequest', 'panel_send', 'panel_edit', 'panel_switch', 'remove', 'rename', 'transfer'];
+const COMMAND_DISPLAY_NAMES = {
+    panel_send: 'panel send', panel_edit: 'panel edit', panel_switch: 'panel switch',
+};
+
+// Commands whose permission list can ONLY be edited by LS+ (Executives included,
+// since Executive sits above LS in the chain). SHR can VIEW but not edit these
+// via /config — per request, this applies only to panel send and panel edit.
+const LS_ONLY_EDIT_COMMANDS = new Set(['panel_send', 'panel_edit']);
+
+const DEFAULT_COMMAND_TIER = {
+    add: 'hr', remove: 'hr', rename: 'hr', claim: 'hr', unclaim: 'hr',
+    close: 'hr', closerequest: 'hr', panel_send: 'hr', panel_edit: 'hr', panel_switch: 'hr',
+    blacklist: 'shr', transfer: 'shr',
+};
+
+function defaultRoleIdsForTier(tier) {
+    if (tier === 'shr') return [process.env.ROLE_SHR, process.env.ROLE_LS, process.env.ROLE_EXEC].filter(Boolean);
+    return [process.env.ROLE_HR, process.env.ROLE_SHR, process.env.ROLE_LS, process.env.ROLE_EXEC].filter(Boolean); // 'hr' tier
+}
+
+async function getCustomCommandRoles(guildId, commandName) {
+    const { data, error } = await supabase
+        .from('command_permissions')
+        .select('role_id')
+        .eq('guild_id', guildId)
+        .eq('command_name', commandName);
+
+    if (error) {
+        console.error('[DHS Tickets] command_permissions read error:', error);
+        return null;
+    }
+    return data && data.length > 0 ? data.map(r => r.role_id) : null;
+}
+
+// Returns { roleIds, isCustom } — the roles currently allowed to use a command,
+// and whether that list came from /config (custom) or the built-in default tier.
+async function getEffectiveCommandRoles(guildId, commandName) {
+    const custom = await getCustomCommandRoles(guildId, commandName);
+    if (custom) return { roleIds: custom, isCustom: true };
+    const tier = DEFAULT_COMMAND_TIER[commandName] || 'hr';
+    return { roleIds: defaultRoleIdsForTier(tier), isCustom: false };
+}
+
+async function canUseCommand(guildId, commandName, member) {
+    if (isExec(member)) return true;
+    const { roleIds } = await getEffectiveCommandRoles(guildId, commandName);
+    return roleIds.some(id => member.roles.cache.has(id));
+}
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 async function getTicketByChannel(channelId) {
@@ -59,7 +152,7 @@ function buildTicketOverwrites(guild, openerId) {
         { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
         { id: openerId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
     ];
-    for (const roleId of [process.env.ROLE_HR, process.env.ROLE_SHR, process.env.ROLE_LS]) {
+    for (const roleId of [process.env.ROLE_HR, process.env.ROLE_SHR, process.env.ROLE_LS, process.env.ROLE_EXEC]) {
         if (roleId) overwrites.push({
             id: roleId,
             allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages]
@@ -72,7 +165,7 @@ function buildTicketOverwrites(guild, openerId) {
 function buildGeneralEmbed() {
     return new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle("❓ General Inquiry's")
+        .setTitle(CATEGORY_TITLES.general)
         .setDescription(
             `Please state your inquiry and wait patiently as our support team reviews the ticket. ` +
             `Failure to state your inquiry after **10** minutes will result in a closure of your ticket.\n\n` +
@@ -85,7 +178,7 @@ function buildGeneralEmbed() {
 function buildAppealEmbed() {
     return new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle("📄 Appeal Inquiry's")
+        .setTitle(CATEGORY_TITLES.appeal)
         .setDescription(
             `Please make sure to fill out the fields below!\n\n` +
             `> \`User:\`\n` +
@@ -103,7 +196,7 @@ function buildAppealEmbed() {
 function buildReportEmbed() {
     return new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle("🚨 Report Inquiry's")
+        .setTitle(CATEGORY_TITLES.report)
         .setDescription(
             `Please make sure to fill out the fields below!\n\n` +
             `> \`User/Agent:\`\n` +
@@ -114,6 +207,12 @@ function buildReportEmbed() {
             `Failure to follow this rule will result in the following: **Warning → Mute → Ticket closed.**`
         )
         .setFooter({ text: 'DHS | Support System' });
+}
+
+function buildCategoryEmbed(category) {
+    if (category === 'general') return buildGeneralEmbed();
+    if (category === 'appeal')  return buildAppealEmbed();
+    return buildReportEmbed();
 }
 
 // ─── Ticket action buttons (sent inside every ticket on open) ─────────────────
@@ -129,10 +228,11 @@ function buildTicketActionRow() {
 function buildPanelEmbed() {
     return new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle('# Department Of Homeland Security')
+        .setTitle('DHS Support Center')
         .setDescription(
-            'Welcome to the Department of Homeland Security Support Center. ' +
-            'Please select the category below that best matches your request.'
+            `# DHS Support Center\n\n` +
+            `Welcome to the Department of Homeland Security Support Center. ` +
+            `Please select the category below that best matches your request.`
         )
         .addFields(
             { name: '❓ General Inquiries',  value: '> • Questions or concerns\n> • Redeem a prize\n> • General assistance',                          inline: false },
@@ -170,8 +270,29 @@ async function logAction(client, opts = {}) {
     await channel.send({ embeds: [embed], allowedMentions: { parse: [] } }).catch(() => null);
 }
 
-// ─── Transcript generator ─────────────────────────────────────────────────────
-async function generateTranscript(ticketChannel, logChannel, ticketId) {
+// ─── Blacklist check helper (used by the panel dropdown) ──────────────────────
+async function isBlacklisted(guildId, member) {
+    const roleIds = [...member.roles.cache.keys()];
+    const ids = [member.id, ...roleIds];
+    const orConditions = ids.map(id => `target_id.eq.${id}`).join(',');
+
+    const { data, error } = await supabase
+        .from('blacklists')
+        .select('id')
+        .eq('guild_id', guildId)
+        .eq('active', true)
+        .or(orConditions)
+        .limit(1);
+
+    if (error) {
+        console.error('[DHS Tickets] Blacklist check error:', error);
+        return false;
+    }
+    return Array.isArray(data) && data.length > 0;
+}
+
+// ─── Transcript generator (returns an attachment, does NOT send anything) ─────
+async function buildTranscriptAttachment(ticketChannel, ticketId) {
     const messages = [];
     let before;
     while (true) {
@@ -221,9 +342,7 @@ header{background:#1d72d7;padding:16px 24px}header h1{font-size:18px;font-weight
 <div class="msgs">${rows || '<p style="color:#72767d;padding:16px 0">No messages.</p>'}</div>
 <footer>Department of Homeland Security — Transcript System</footer></body></html>`;
 
-    const attachment = new AttachmentBuilder(Buffer.from(html, 'utf-8'), { name: `transcript-${ticketId}.html` });
-    const msg = await logChannel.send({ files: [attachment] }).catch(() => null);
-    return msg?.attachments.first()?.url ?? null;
+    return new AttachmentBuilder(Buffer.from(html, 'utf-8'), { name: `transcript-${ticketId}.html` });
 }
 
 // ─── Core close logic (shared by /close, button close, closerequest accept) ───
@@ -232,9 +351,9 @@ async function executeClose(interaction, ticket, reason) {
     const guild      = interaction.guild;
     const logChannel = guild.channels.cache.get(CLOSE_LOG_CHANNEL);
 
-    let transcriptUrl = null;
+    let transcriptAttachment = null;
     if (logChannel) {
-        transcriptUrl = await generateTranscript(channel, logChannel, ticket.ticket_id);
+        transcriptAttachment = await buildTranscriptAttachment(channel, ticket.ticket_id);
     }
 
     const now        = new Date();
@@ -242,14 +361,8 @@ async function executeClose(interaction, ticket, reason) {
     const closedUnix = Math.floor(now.getTime() / 1000);
     const claimedBy  = ticket.claimed_by ? `<@${ticket.claimed_by}>` : 'Unclaimed';
 
-    await supabase.from('tickets').update({
-        status: 'closed', closed_by: interaction.user.id,
-        closed_at: now.toISOString(), close_reason: reason, transcript_url: transcriptUrl
-    }).eq('id', ticket.id);
-
     await logAction(interaction.client, { action: 'Ticket Closed', executor: interaction.user, ticketId: ticket.ticket_id, reason });
 
-    // ── Closure log embed ─────────────────────────────────────────────────────
     const logEmbed = new EmbedBuilder()
         .setColor(0xe74c3c)
         .setTitle('Ticket Closed')
@@ -264,18 +377,32 @@ async function executeClose(interaction, ticket, reason) {
         )
         .setFooter({ text: 'DHS | Support System' });
 
-    const logRow = new ActionRowBuilder().addComponents(
+    const editReasonRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`ticket:editreason:${ticket.id}`).setLabel('Edit Reason').setStyle(ButtonStyle.Secondary)
     );
-    if (transcriptUrl) {
-        logRow.addComponents(new ButtonBuilder().setLabel('View Transcript').setStyle(ButtonStyle.Link).setURL(transcriptUrl));
-    }
 
+    let transcriptUrl = null;
     if (logChannel) {
-        await logChannel.send({ embeds: [logEmbed], components: [logRow], allowedMentions: { parse: [] } }).catch(() => null);
+        const payload = { embeds: [logEmbed], components: [editReasonRow], allowedMentions: { parse: [] } };
+        if (transcriptAttachment) payload.files = [transcriptAttachment];
+
+        const sentLog = await logChannel.send(payload).catch(() => null);
+        transcriptUrl = sentLog?.attachments?.first()?.url ?? null;
+
+        if (sentLog && transcriptUrl) {
+            const finalRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`ticket:editreason:${ticket.id}`).setLabel('Edit Reason').setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder().setLabel('View Transcript').setStyle(ButtonStyle.Link).setURL(transcriptUrl)
+            );
+            await sentLog.edit({ components: [finalRow] }).catch(() => null);
+        }
     }
 
-    // ── DM ticket opener ──────────────────────────────────────────────────────
+    await supabase.from('tickets').update({
+        status: 'closed', closed_by: interaction.user.id,
+        closed_at: now.toISOString(), close_reason: reason, transcript_url: transcriptUrl
+    }).eq('id', ticket.id);
+
     const opener = await guild.members.fetch(ticket.owner_id).catch(() => null);
     if (opener) {
         const dmEmbed = new EmbedBuilder()
@@ -310,13 +437,13 @@ async function executeClose(interaction, ticket, reason) {
 const add = {
     data: new SlashCommandBuilder()
         .setName('add')
-        .setDescription('Add a user to this ticket. [HR+]')
+        .setDescription('Add a user to this ticket.')
         .addUserOption(o => o.setName('user').setDescription('User to add.').setRequired(true)),
 
     async execute(interaction) {
         const ticket = await getTicketByChannel(interaction.channelId);
         if (!ticket) return interaction.reply({ content: 'This command can only be used inside a ticket channel.', ephemeral: true });
-        if (!isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to add users to tickets.', ephemeral: true });
+        if (!(await canUseCommand(interaction.guildId, 'add', interaction.member))) return interaction.reply({ content: 'You do not have permission to add users to tickets.', ephemeral: true });
 
         const target = interaction.options.getMember('user');
         if (!target) return interaction.reply({ content: 'User not found in this server.', ephemeral: true });
@@ -342,7 +469,7 @@ const add = {
 const blacklist = {
     data: new SlashCommandBuilder()
         .setName('blacklist')
-        .setDescription('Manage the ticket blacklist. [SHR+]')
+        .setDescription('Manage the ticket blacklist.')
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
         .addSubcommand(sub => sub.setName('add').setDescription('Blacklist a user or role from opening tickets.')
             .addUserOption(o => o.setName('user').setDescription('User to blacklist.').setRequired(false))
@@ -355,15 +482,15 @@ const blacklist = {
         ),
 
     async execute(interaction) {
-        if (!isSHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to manage the blacklist.', ephemeral: true });
+        if (!(await canUseCommand(interaction.guildId, 'blacklist', interaction.member))) return interaction.reply({ content: 'You do not have permission to manage the blacklist.', ephemeral: true });
 
         const sub        = interaction.options.getSubcommand();
-        const user       = interaction.options.getUser('user');
-        const role       = interaction.options.getRole('role');
-        const reason     = interaction.options.getString('reason') ?? 'No reason provided.';
-        const targetId   = user?.id ?? role?.id;
-        const targetType = user ? 'user' : role ? 'role' : null;
-        const targetName = user?.tag ?? user?.username ?? role?.name;
+        const user        = interaction.options.getUser('user');
+        const role        = interaction.options.getRole('role');
+        const reason       = interaction.options.getString('reason') ?? 'No reason provided.';
+        const targetId     = user?.id ?? role?.id;
+        const targetType   = user ? 'user' : role ? 'role' : null;
+        const targetName   = user?.tag ?? user?.username ?? role?.name;
 
         if (!targetId) return interaction.reply({ content: 'Provide a user or role.', ephemeral: true });
 
@@ -412,19 +539,18 @@ const blacklist = {
 const claim = {
     data: new SlashCommandBuilder()
         .setName('claim')
-        .setDescription('Claim this ticket as your own. [HR+]'),
+        .setDescription('Claim this ticket as your own.'),
 
     async execute(interaction) {
         const ticket = await getTicketByChannel(interaction.channelId);
         if (!ticket) return interaction.reply({ content: 'This command can only be used inside a ticket channel.', ephemeral: true });
-        if (!isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to claim tickets.', ephemeral: true });
+        if (!(await canUseCommand(interaction.guildId, 'claim', interaction.member))) return interaction.reply({ content: 'You do not have permission to claim tickets.', ephemeral: true });
         if (ticket.claimed_by) {
             return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`This ticket is already claimed by <@${ticket.claimed_by}>.`).setFooter({ text: 'DHS | Support System' })], ephemeral: true });
         }
 
         await interaction.deferReply();
 
-        // Lock HR role from sending; give claimer explicit access
         if (process.env.ROLE_HR) await interaction.channel.permissionOverwrites.edit(process.env.ROLE_HR, { SendMessages: false }).catch(() => null);
         await interaction.channel.permissionOverwrites.edit(interaction.member, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true }).catch(() => null);
 
@@ -437,12 +563,11 @@ const claim = {
         });
     },
 
-    // Claim button inside ticket channel
     buttons: {
         'ticket:claim': async (interaction) => {
             const ticket = await getTicketByChannel(interaction.channelId);
             if (!ticket) return interaction.reply({ content: 'Ticket data not found.', ephemeral: true });
-            if (!isHR(interaction.member)) return interaction.reply({ content: 'You need HR+ to claim tickets.', ephemeral: true });
+            if (!(await canUseCommand(interaction.guildId, 'claim', interaction.member))) return interaction.reply({ content: 'You need permission to claim tickets.', ephemeral: true });
             if (ticket.claimed_by) {
                 return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`Already claimed by <@${ticket.claimed_by}>.`).setFooter({ text: 'DHS | Support System' })], ephemeral: true });
             }
@@ -467,12 +592,12 @@ const claim = {
 const unclaim = {
     data: new SlashCommandBuilder()
         .setName('unclaim')
-        .setDescription('Unclaim this ticket. [HR+ own | SHR+ any]'),
+        .setDescription('Unclaim this ticket.'),
 
     async execute(interaction) {
         const ticket = await getTicketByChannel(interaction.channelId);
         if (!ticket) return interaction.reply({ content: 'This command can only be used inside a ticket channel.', ephemeral: true });
-        if (!isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to unclaim tickets.', ephemeral: true });
+        if (!(await canUseCommand(interaction.guildId, 'unclaim', interaction.member))) return interaction.reply({ content: 'You do not have permission to unclaim tickets.', ephemeral: true });
         if (!ticket.claimed_by) return interaction.reply({ content: 'This ticket is not currently claimed.', ephemeral: true });
 
         if (ticket.claimed_by !== interaction.user.id && !isSHR(interaction.member)) {
@@ -486,10 +611,8 @@ const unclaim = {
 
         const prevClaimerId = ticket.claimed_by;
 
-        // Restore HR role send permissions
         if (process.env.ROLE_HR) await interaction.channel.permissionOverwrites.edit(process.env.ROLE_HR, { SendMessages: true }).catch(() => null);
 
-        // Remove individual override for the previous claimer
         const prevMember = await interaction.guild.members.fetch(prevClaimerId).catch(() => null);
         if (prevMember) await interaction.channel.permissionOverwrites.delete(prevMember).catch(() => null);
 
@@ -512,7 +635,7 @@ const unclaim = {
 const close = {
     data: new SlashCommandBuilder()
         .setName('close')
-        .setDescription('Immediately close this ticket. [HR+ or ticket owner]')
+        .setDescription('Immediately close this ticket.')
         .addStringOption(o => o.setName('reason').setDescription('Reason for closing.').setRequired(false)),
 
     async execute(interaction) {
@@ -521,7 +644,7 @@ const close = {
         if (ticket.status === 'closed') return interaction.reply({ content: 'This ticket is already closed.', ephemeral: true });
 
         const isOwner = ticket.owner_id === interaction.user.id;
-        if (!isOwner && !isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to close this ticket.', ephemeral: true });
+        if (!isOwner && !(await canUseCommand(interaction.guildId, 'close', interaction.member))) return interaction.reply({ content: 'You do not have permission to close this ticket.', ephemeral: true });
 
         const reason = interaction.options.getString('reason') ?? 'No reason provided.';
         await interaction.deferReply();
@@ -534,7 +657,7 @@ const close = {
             if (!ticket) return interaction.reply({ content: 'Ticket data not found.', ephemeral: true });
 
             const isOwner = ticket.owner_id === interaction.user.id;
-            if (!isOwner && !isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to close this ticket.', ephemeral: true });
+            if (!isOwner && !(await canUseCommand(interaction.guildId, 'close', interaction.member))) return interaction.reply({ content: 'You do not have permission to close this ticket.', ephemeral: true });
 
             await interaction.deferReply();
             await executeClose(interaction, ticket, 'Closed via button.');
@@ -592,13 +715,13 @@ const close = {
 const closerequest = {
     data: new SlashCommandBuilder()
         .setName('closerequest')
-        .setDescription('Request that the ticket opener closes this ticket. [HR+]')
+        .setDescription('Request that the ticket opener closes this ticket.')
         .addStringOption(o => o.setName('reason').setDescription('Reason for the close request.').setRequired(false)),
 
     async execute(interaction) {
         const ticket = await getTicketByChannel(interaction.channelId);
         if (!ticket) return interaction.reply({ content: 'This command can only be used inside a ticket channel.', ephemeral: true });
-        if (!isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to send a close request.', ephemeral: true });
+        if (!(await canUseCommand(interaction.guildId, 'closerequest', interaction.member))) return interaction.reply({ content: 'You do not have permission to send a close request.', ephemeral: true });
 
         const reason = interaction.options.getString('reason') ?? 'No reason provided.';
 
@@ -617,12 +740,11 @@ const closerequest = {
         });
     },
 
-    // Button inside ticket (from the action row sent on open)
     buttons: {
         'ticket:closerequest': async (interaction) => {
             const ticket = await getTicketByChannel(interaction.channelId);
             if (!ticket) return interaction.reply({ content: 'Ticket data not found.', ephemeral: true });
-            if (!isHR(interaction.member)) return interaction.reply({ content: 'You need HR+ to request ticket closure.', ephemeral: true });
+            if (!(await canUseCommand(interaction.guildId, 'closerequest', interaction.member))) return interaction.reply({ content: 'You need permission to request ticket closure.', ephemeral: true });
 
             return interaction.reply({
                 embeds: [
@@ -647,13 +769,13 @@ const closerequest = {
 const panel = {
     data: new SlashCommandBuilder()
         .setName('panel')
-        .setDescription('Manage the DHS ticket panel. [HR+]')
+        .setDescription('Manage the DHS ticket panel.')
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
         .addSubcommand(sub => sub.setName('send').setDescription('Send the ticket panel to this channel.'))
         .addSubcommand(sub => sub.setName('edit').setDescription('Edit the existing ticket panel (no duplicates).')
             .addStringOption(o => o.setName('message_id').setDescription('Message ID of the existing panel.').setRequired(true))
         )
-        .addSubcommand(sub => sub.setName('switch').setDescription('Switch the category of this ticket.')
+        .addSubcommand(sub => sub.setName('switch').setDescription("Switch this ticket's category.")
             .addStringOption(o => o.setName('category').setDescription('Category to switch to.').setRequired(true)
                 .addChoices(
                     { name: "❓ General Inquiry's", value: 'general' },
@@ -664,9 +786,13 @@ const panel = {
         ),
 
     async execute(interaction) {
-        if (!isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to manage the panel.', ephemeral: true });
-
         const sub = interaction.options.getSubcommand();
+        const configKey = sub === 'send' ? 'panel_send' : sub === 'edit' ? 'panel_edit' : 'panel_switch';
+
+        if (!(await canUseCommand(interaction.guildId, configKey, interaction.member))) {
+            return interaction.reply({ content: `You do not have permission to use \`/panel ${sub}\`.`, ephemeral: true });
+        }
+
         await interaction.deferReply({ ephemeral: true });
 
         if (sub === 'send') {
@@ -686,17 +812,46 @@ const panel = {
         }
 
         if (sub === 'switch') {
+            const ticket = await getTicketByChannel(interaction.channelId);
+            if (!ticket) return interaction.editReply({ content: 'This command can only be used inside a ticket channel.' });
+
             const category = interaction.options.getString('category');
-            const { data: current } = await supabase.from('panel_settings').select('default_category').eq('guild_id', interaction.guildId).maybeSingle();
-            if (current?.default_category === category) {
-                return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`The panel is already set to **${category}**.`).setFooter({ text: 'DHS | Support System' })] });
+
+            if (ticket.category === category) {
+                return interaction.editReply({
+                    embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`This ticket is already set to **${CATEGORY_LABELS[category]}**.`).setFooter({ text: 'DHS | Support System' })]
+                });
             }
-            await supabase.from('panel_settings').upsert({ guild_id: interaction.guildId, default_category: category, updated_by: interaction.user.id, updated_at: new Date().toISOString() }, { onConflict: 'guild_id' });
-            const labels = { general: "❓ General Inquiry's", appeal: "📄 Appeal Inquiry's", report: "🚨 Report Inquiry's" };
-            await logAction(interaction.client, { action: 'Panel Switch', executor: interaction.user, extra: [{ name: 'New Category', value: labels[category] ?? category, inline: true }] });
+
+            const recentMsgs = await interaction.channel.messages.fetch({ limit: 50 }).catch(() => null);
+            const openMsg = recentMsgs?.find(m =>
+                m.author?.id === interaction.client.user.id &&
+                m.embeds?.[0]?.title &&
+                Object.values(CATEGORY_TITLES).includes(m.embeds[0].title)
+            );
+            if (openMsg) {
+                await openMsg.edit({ embeds: [buildCategoryEmbed(category)] }).catch(() => null);
+            }
+
+            const newParentId = process.env[`TICKET_CATEGORY_${category.toUpperCase()}`];
+            if (newParentId) {
+                await interaction.channel.setParent(newParentId, { lockPermissions: false }).catch(() => null);
+            }
+
+            const oldCategory = ticket.category;
+            await supabase.from('tickets').update({ category }).eq('id', ticket.id);
+
+            await logAction(interaction.client, {
+                action: 'Panel Switch', executor: interaction.user, ticketId: ticket.ticket_id,
+                extra: [
+                    { name: 'Old Category', value: CATEGORY_LABELS[oldCategory] ?? oldCategory, inline: true },
+                    { name: 'New Category', value: CATEGORY_LABELS[category] ?? category, inline: true }
+                ]
+            });
+
             return interaction.editReply({
-                embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Ticket Panel Switch')
-                    .setDescription(`This ticket panel has been switched to: **${labels[category] ?? category}**\nSwitched by: <@${interaction.user.id}>`)
+                embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Ticket Category Switched')
+                    .setDescription(`This ticket has been switched to: **${CATEGORY_LABELS[category] ?? category}**\nSwitched by: <@${interaction.user.id}>`)
                     .setFooter({ text: 'DHS | Support System' })]
             });
         }
@@ -710,18 +865,13 @@ const panel = {
             const guild    = interaction.guild;
             const opener   = interaction.member;
 
-            // Blacklist check — user ID and all role IDs
-            const roleIds      = [...opener.roles.cache.keys()];
-            const orConditions = [`target_id.eq.${opener.id}`, ...roleIds.map(id => `target_id.eq.${id}`)].join(',');
-            const { data: blacklist } = await supabase.from('blacklists').select('id').eq('guild_id', guild.id).eq('active', true).or(orConditions).maybeSingle();
-
-            if (blacklist) {
+            const blocked = await isBlacklisted(guild.id, opener);
+            if (blocked) {
                 return interaction.editReply({
                     embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Access Denied').setDescription('You are currently blacklisted from opening tickets.').setFooter({ text: 'DHS | Support System' })]
                 });
             }
 
-            // Max 2 open tickets per category
             const { data: openInCategory } = await supabase.from('tickets').select('channel_id').eq('guild_id', guild.id).eq('owner_id', opener.id).eq('category', category).eq('status', 'open');
             if (openInCategory && openInCategory.length >= 2) {
                 const links = openInCategory.map(t => `<#${t.channel_id}>`).join(' and ');
@@ -730,7 +880,6 @@ const panel = {
                 });
             }
 
-            // Get next ticket number
             const { data: ticketNum, error: numErr } = await supabase.rpc('increment_ticket_counter', { p_guild_id: guild.id });
             if (numErr) {
                 console.error('[DHS Tickets] Counter RPC error:', numErr);
@@ -750,22 +899,19 @@ const panel = {
 
             if (!ticketChannel) return interaction.editReply({ content: 'Failed to create ticket channel. Check bot permissions.' });
 
-            // Send category embed + spoiler ping + action buttons
-            let openEmbed;
-            if (category === 'general')     openEmbed = buildGeneralEmbed();
-            else if (category === 'appeal') openEmbed = buildAppealEmbed();
-            else                            openEmbed = buildReportEmbed();
+            const openEmbed = buildCategoryEmbed(category);
 
-            const hrId  = process.env.ROLE_HR;
-            const shrId = process.env.ROLE_SHR;
-            const ping  = `||<@${opener.id}>${hrId ? ` <@&${hrId}>` : ''}${shrId ? ` <@&${shrId}>` : ''}||`;
+            const hrId   = process.env.ROLE_HR;
+            const shrId  = process.env.ROLE_SHR;
+            const lsId   = process.env.ROLE_LS;
+            const execId = process.env.ROLE_EXEC;
+            const ping   = `||<@${opener.id}>${hrId ? ` <@&${hrId}>` : ''}${shrId ? ` <@&${shrId}>` : ''}||`;
 
             await ticketChannel.send({
                 content: ping, embeds: [openEmbed], components: [buildTicketActionRow()],
-                allowedMentions: { users: [opener.id], roles: [hrId, shrId].filter(Boolean) }
+                allowedMentions: { users: [opener.id], roles: [hrId, shrId, lsId, execId].filter(Boolean) }
             });
 
-            // Store in Supabase
             const { error: dbErr } = await supabase.from('tickets').insert({
                 guild_id: guild.id, channel_id: ticketChannel.id, owner_id: opener.id,
                 category, status: 'open', ticket_id: ticketId, ticket_num: ticketNum,
@@ -786,13 +932,13 @@ const panel = {
 const remove = {
     data: new SlashCommandBuilder()
         .setName('remove')
-        .setDescription('Remove a user from this ticket. [HR+]')
+        .setDescription('Remove a user from this ticket.')
         .addUserOption(o => o.setName('user').setDescription('User to remove.').setRequired(true)),
 
     async execute(interaction) {
         const ticket = await getTicketByChannel(interaction.channelId);
         if (!ticket) return interaction.reply({ content: 'This command can only be used inside a ticket channel.', ephemeral: true });
-        if (!isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to remove users from tickets.', ephemeral: true });
+        if (!(await canUseCommand(interaction.guildId, 'remove', interaction.member))) return interaction.reply({ content: 'You do not have permission to remove users from tickets.', ephemeral: true });
 
         const target = interaction.options.getMember('user');
         if (!target) return interaction.reply({ content: 'User not found in this server.', ephemeral: true });
@@ -814,13 +960,13 @@ const remove = {
 const rename = {
     data: new SlashCommandBuilder()
         .setName('rename')
-        .setDescription('Rename this ticket channel. [HR+]')
+        .setDescription('Rename this ticket channel.')
         .addStringOption(o => o.setName('name').setDescription('New channel name.').setRequired(true)),
 
     async execute(interaction) {
         const ticket = await getTicketByChannel(interaction.channelId);
         if (!ticket) return interaction.reply({ content: 'This command can only be used inside a ticket channel.', ephemeral: true });
-        if (!isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to rename tickets.', ephemeral: true });
+        if (!(await canUseCommand(interaction.guildId, 'rename', interaction.member))) return interaction.reply({ content: 'You do not have permission to rename tickets.', ephemeral: true });
 
         const name = interaction.options.getString('name').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
         if (!name) return interaction.reply({ content: 'Invalid channel name. Use letters, numbers, and hyphens only.', ephemeral: true });
@@ -841,27 +987,45 @@ const rename = {
 const transfer = {
     data: new SlashCommandBuilder()
         .setName('transfer')
-        .setDescription('Transfer ticket ownership to another user. [HR+]')
-        .addUserOption(o => o.setName('user').setDescription('New ticket owner.').setRequired(true)),
+        .setDescription('Transfer this ticket\'s claim to another staff member.')
+        .addUserOption(o => o.setName('user').setDescription('Staff member to transfer the claim to.').setRequired(true)),
 
     async execute(interaction) {
         const ticket = await getTicketByChannel(interaction.channelId);
         if (!ticket) return interaction.reply({ content: 'This command can only be used inside a ticket channel.', ephemeral: true });
-        if (!isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to transfer tickets.', ephemeral: true });
+        if (!ticket.claimed_by) return interaction.reply({ content: 'This ticket has not been claimed yet. Use /claim first.', ephemeral: true });
+
+        const isCurrentClaimer = ticket.claimed_by === interaction.user.id;
+        const hasBasePerm = await canUseCommand(interaction.guildId, 'transfer', interaction.member);
+        if (!hasBasePerm && !(isHR(interaction.member) && isCurrentClaimer)) {
+            return interaction.reply({ content: 'You do not have permission to transfer this ticket. SHR+ can transfer any claimed ticket; HR can only transfer a ticket they have claimed.', ephemeral: true });
+        }
 
         const target = interaction.options.getMember('user');
         if (!target) return interaction.reply({ content: 'User not found in this server.', ephemeral: true });
-        if (target.id === ticket.owner_id) return interaction.reply({ content: 'That user is already the ticket owner.', ephemeral: true });
         if (target.user.bot) return interaction.reply({ content: 'Cannot transfer a ticket to a bot.', ephemeral: true });
+        if (!isHR(target)) return interaction.reply({ content: 'You can only transfer the claim to another staff member (HR+).', ephemeral: true });
+        if (target.id === ticket.claimed_by) return interaction.reply({ content: 'That user already has this ticket claimed.', ephemeral: true });
 
-        const oldOwner = ticket.owner_id;
-        await interaction.channel.permissionOverwrites.delete(oldOwner).catch(() => null);
-        await interaction.channel.permissionOverwrites.create(target, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
-        await supabase.from('tickets').update({ owner_id: target.id }).eq('id', ticket.id);
-        await logAction(interaction.client, { action: 'Ticket Transferred', executor: interaction.user, target: target.user, ticketId: ticket.ticket_id, extra: { name: 'Previous Owner', value: `<@${oldOwner}>`, inline: true } });
+        await interaction.deferReply();
 
-        return interaction.reply({
-            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setDescription(`Ticket ownership transferred from <@${oldOwner}> to <@${target.id}>.`).setFooter({ text: 'DHS | Support System' })],
+        const prevClaimerId = ticket.claimed_by;
+
+        const prevMember = await interaction.guild.members.fetch(prevClaimerId).catch(() => null);
+        if (prevMember) await interaction.channel.permissionOverwrites.delete(prevMember).catch(() => null);
+
+        await interaction.channel.permissionOverwrites.edit(target, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true }).catch(() => null);
+
+        await supabase.from('tickets').update({ claimed_by: target.id }).eq('id', ticket.id);
+        await logAction(interaction.client, {
+            action: 'Ticket Claim Transferred', executor: interaction.user, target: target.user, ticketId: ticket.ticket_id,
+            extra: { name: 'Previous Claimer', value: `<@${prevClaimerId}>`, inline: true }
+        });
+
+        return interaction.editReply({
+            embeds: [new EmbedBuilder().setColor(EMBED_COLOR)
+                .setDescription(`This ticket's claim has been transferred from <@${prevClaimerId}> to <@${target.id}>. <@${target.id}> is now handling this ticket.`)
+                .setFooter({ text: 'DHS | Support System' })],
             allowedMentions: { parse: [] }
         });
     }
@@ -873,29 +1037,167 @@ const transfer = {
 const jump = {
     data: new SlashCommandBuilder()
         .setName('jump')
-        .setDescription('Get a jump link to a ticket channel by number.')
-        .addIntegerOption(o => o.setName('number').setDescription('Ticket number (e.g. 5 for ticket-5).').setRequired(true).setMinValue(1)),
+        .setDescription('Jump to the start of this ticket.'),
 
     async execute(interaction) {
-        const num         = interaction.options.getInteger('number');
-        const channelName = `ticket-${num}`;
-        const found       = interaction.guild.channels.cache.find(c => c.name === channelName);
+        const ticket = await getTicketByChannel(interaction.channelId);
+        if (!ticket) return interaction.reply({ content: 'This command can only be used inside a ticket channel.', ephemeral: true });
 
-        if (!found) {
-            return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`Could not find \`${channelName}\`. It may have been closed or does not exist.`).setFooter({ text: 'DHS | Support System' })],
-                ephemeral: true
-            });
+        const firstBatch = await interaction.channel.messages.fetch({ limit: 1, after: '0' }).catch(() => null);
+        const firstMsg   = firstBatch?.first();
+
+        if (!firstMsg) {
+            return interaction.reply({ content: 'Could not locate the start of this ticket.', ephemeral: true });
         }
 
+        const link = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${firstMsg.id}`;
+
         return interaction.reply({
-            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Jump to Ticket').setDescription(`[Click here to jump to ticket-${num}](https://discord.com/channels/${interaction.guildId}/${found.id})`).setFooter({ text: 'DHS | Support System' })],
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setLabel('Jump to Start').setStyle(ButtonStyle.Link).setURL(link)
+            )],
             ephemeral: true
         });
     }
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  /config
+//  SHR+ only (SHR, LS, Executive) can run /config and VIEW any command's
+//  allowed roles, shown as clean @role mentions.
+//
+//  Editing (add/remove a role):
+//    - For every command EXCEPT /panel — SHR+ may add/remove roles.
+//    - For /panel specifically — only LS+ (LS, Executive) may add/remove
+//      roles. SHR/Executive-below-LS... note Executive sits above LS, so
+//      Executive can still edit. Plain SHR can view /panel's roles but the
+//      edit controls are hidden for them with an explanatory note.
+// ═══════════════════════════════════════════════════════════════════════════════
+function canEditCommandConfig(commandName, member) {
+    if (LS_ONLY_EDIT_COMMANDS.has(commandName)) return isLS(member);
+    return isSHR(member);
+}
+
+async function buildConfigPayload(guild, commandName, member) {
+    const { roleIds, isCustom } = await getEffectiveCommandRoles(guild.id, commandName);
+    const editPermitted = canEditCommandConfig(commandName, member);
+
+    const roleLines = roleIds.length
+        ? roleIds.map(id => `<@&${id}>`).join('\n')
+        : '*No roles currently have permission to use this command.*';
+
+    const displayName = COMMAND_DISPLAY_NAMES[commandName] ?? commandName;
+    const embed = new EmbedBuilder()
+        .setColor(EMBED_COLOR)
+        .setTitle(`Command Config — /${displayName}`)
+        .setDescription(`The following roles currently have permission to use **/${displayName}** in tickets:\n\n${roleLines}`)
+        .setFooter({ text: isCustom ? 'DHS | Support System • Custom configuration' : 'DHS | Support System • Default configuration' });
+
+    if (LS_ONLY_EDIT_COMMANDS.has(commandName) && !editPermitted) {
+        embed.addFields({ name: 'Note', value: 'Only LS+ may modify permissions for this command. You can view, but not edit, this configuration.' });
+    }
+
+    const components = [];
+    if (editPermitted) {
+        components.push(new ActionRowBuilder().addComponents(
+            new RoleSelectMenuBuilder()
+                .setCustomId(`config:add:${commandName}`)
+                .setPlaceholder('Add a role with permission to use this command')
+                .setMinValues(1)
+                .setMaxValues(1)
+        ));
+
+        if (roleIds.length > 0) {
+            const removeOptions = roleIds.slice(0, 25).map(id => {
+                const role = guild.roles.cache.get(id);
+                return new StringSelectMenuOptionBuilder()
+                    .setLabel(role ? role.name : `Unknown Role (${id})`)
+                    .setValue(id);
+            });
+            components.push(new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId(`config:remove:${commandName}`)
+                    .setPlaceholder('Remove a role\'s permission for this command')
+                    .addOptions(removeOptions)
+            ));
+        }
+    }
+
+    return { embeds: [embed], components, ephemeral: true };
+}
+
+const config = {
+    data: new SlashCommandBuilder()
+        .setName('config')
+        .setDescription("View or edit which roles can use the ticket system's commands.")
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+        .addStringOption(o => o.setName('command').setDescription('Command to view/configure.').setRequired(true)
+            .addChoices(...COMMAND_LIST.map(c => ({ name: COMMAND_DISPLAY_NAMES[c] ?? c, value: c })))
+        ),
+
+    async execute(interaction) {
+        if (!isSHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to view command configuration.', ephemeral: true });
+
+        const commandName = interaction.options.getString('command');
+        const payload = await buildConfigPayload(interaction.guild, commandName, interaction.member);
+        return interaction.reply(payload);
+    },
+
+    selectMenus: {
+        'config:add': async (interaction) => {
+            if (!isSHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to edit command configuration.', ephemeral: true });
+
+            const commandName = interaction.customId.split(':')[2];
+            if (!canEditCommandConfig(commandName, interaction.member)) {
+                return interaction.reply({ content: `Only LS+ may modify permissions for /${COMMAND_DISPLAY_NAMES[commandName] ?? commandName}.`, ephemeral: true });
+            }
+
+            const roleId = interaction.values[0];
+            const { error } = await supabase.from('command_permissions').upsert({
+                guild_id: interaction.guildId, command_name: commandName, role_id: roleId,
+                added_by: interaction.user.id, added_at: new Date().toISOString()
+            }, { onConflict: 'guild_id,command_name,role_id' });
+
+            if (error) return interaction.reply({ content: 'Failed to update configuration.', ephemeral: true });
+
+            await logAction(interaction.client, {
+                action: 'Command Config Updated', executor: interaction.user,
+                extra: [{ name: 'Command', value: `/${commandName}`, inline: true }, { name: 'Role Added', value: `<@&${roleId}>`, inline: true }]
+            });
+
+            const payload = await buildConfigPayload(interaction.guild, commandName, interaction.member);
+            return interaction.update(payload);
+        },
+
+        'config:remove': async (interaction) => {
+            if (!isSHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to edit command configuration.', ephemeral: true });
+
+            const commandName = interaction.customId.split(':')[2];
+            if (!canEditCommandConfig(commandName, interaction.member)) {
+                return interaction.reply({ content: `Only LS+ may modify permissions for /${COMMAND_DISPLAY_NAMES[commandName] ?? commandName}.`, ephemeral: true });
+            }
+
+            const roleId = interaction.values[0];
+            const { error } = await supabase.from('command_permissions')
+                .delete()
+                .eq('guild_id', interaction.guildId)
+                .eq('command_name', commandName)
+                .eq('role_id', roleId);
+
+            if (error) return interaction.reply({ content: 'Failed to update configuration.', ephemeral: true });
+
+            await logAction(interaction.client, {
+                action: 'Command Config Updated', executor: interaction.user,
+                extra: [{ name: 'Command', value: `/${commandName}`, inline: true }, { name: 'Role Removed', value: `<@&${roleId}>`, inline: true }]
+            });
+
+            const payload = await buildConfigPayload(interaction.guild, commandName, interaction.member);
+            return interaction.update(payload);
+        }
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  EXPORT — array of all commands
 // ═══════════════════════════════════════════════════════════════════════════════
-export const commands = [add, blacklist, claim, unclaim, close, closerequest, panel, remove, rename, transfer, jump];
+export const commands = [add, blacklist, claim, unclaim, close, closerequest, panel, remove, rename, transfer, jump, config];
