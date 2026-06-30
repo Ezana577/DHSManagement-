@@ -4,6 +4,7 @@ import { readdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
 import http from 'http';
+import { commands as ticketCommands } from './ticketCommands.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -19,15 +20,17 @@ const client = new Client({
     partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
 
-client.commands = new Collection();
+client.commands     = new Collection();
 client.prefixCommands = new Collection();
-client.buttons = new Collection();
-client.modals = new Collection();
+client.buttons      = new Collection();
+client.modals       = new Collection();
+client.selectMenus  = new Collection();
 
 const originUserMap = new Map();
-
-const commandFiles = readdirSync(join(__dirname, 'commands')).filter((f) => f.endsWith('.js'));
 const commandPayloads = [];
+
+// ── Load slash commands from /commands folder (existing system) ──────────────
+const commandFiles = readdirSync(join(__dirname, 'commands')).filter((f) => f.endsWith('.js'));
 
 for (const file of commandFiles) {
     const command = await import(`./commands/${file}`);
@@ -45,8 +48,43 @@ for (const file of commandFiles) {
             client.modals.set(id, handler);
         }
     }
+
+    if (command.selectMenus) {
+        for (const [id, handler] of Object.entries(command.selectMenus)) {
+            client.selectMenus.set(id, handler);
+        }
+    }
 }
 
+// ── Load all-in-one DHS ticket commands (ticketCommands.js) ──────────────────
+for (const cmd of ticketCommands) {
+    client.commands.set(cmd.data.name, cmd);
+    commandPayloads.push(cmd.data.toJSON());
+
+    if (cmd.buttons) {
+        for (const [id, handler] of Object.entries(cmd.buttons)) {
+            client.buttons.set(id, handler);
+        }
+    }
+
+    if (cmd.modals) {
+        for (const [id, handler] of Object.entries(cmd.modals)) {
+            client.modals.set(id, handler);
+        }
+    }
+
+    if (cmd.selectMenus) {
+        for (const [id, handler] of Object.entries(cmd.selectMenus)) {
+            client.selectMenus.set(id, handler);
+        }
+    }
+}
+
+console.log('[DHS] Registered slash commands:', [...client.commands.keys()]);
+console.log('[DHS] Registered button handlers:', [...client.buttons.keys()]);
+console.log('[DHS] Registered select menu handlers:', [...client.selectMenus.keys()]);
+
+// ── Load prefix commands ──────────────────────────────────────────────────────
 const prefixCommandFiles = readdirSync(join(__dirname, 'prefixCommands')).filter((f) => f.endsWith('.js'));
 
 console.log('[DHS] prefixCommands folder contents:', prefixCommandFiles);
@@ -91,6 +129,7 @@ for (const file of prefixCommandFiles) {
 
 console.log('[DHS] Registered prefix commands:', [...client.prefixCommands.keys()]);
 
+// ── Register slash commands with Discord ─────────────────────────────────────
 const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 try {
     await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), {
@@ -101,6 +140,7 @@ try {
     console.error('[DHS] Failed to register slash commands:', err);
 }
 
+// ── HTTP keepalive server (Render) ────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -111,6 +151,7 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`[DHS] HTTP server listening on port ${PORT}`);
 });
 
+// ── Load events ────────────────────────────────────────────────────────────────
 const eventFiles = readdirSync(join(__dirname, 'events')).filter((f) => f.endsWith('.js'));
 console.log('[DHS] events folder contents:', eventFiles);
 
@@ -119,7 +160,7 @@ for (const file of eventFiles) {
     console.log(`[DHS] Registering event: ${event.name}`);
     const handler = (...args) => {
         if (event.name === 'interactionCreate') {
-            event.execute(...args, client.commands, client.buttons, client.modals);
+            event.execute(...args, client.commands, client.buttons, client.modals, client.selectMenus);
         } else if (event.name === 'messageCreate') {
             event.execute(...args, client.prefixCommands);
         } else {
