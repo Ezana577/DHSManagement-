@@ -20,11 +20,10 @@ const client = new Client({
     partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
 
-client.commands     = new Collection();
+client.commands = new Collection();
 client.prefixCommands = new Collection();
-client.buttons      = new Collection();
-client.modals       = new Collection();
-client.selectMenus  = new Collection();
+client.buttons = new Collection();
+client.modals = new Collection();
 
 const originUserMap = new Map();
 const commandPayloads = [];
@@ -48,15 +47,12 @@ for (const file of commandFiles) {
             client.modals.set(id, handler);
         }
     }
-
-    if (command.selectMenus) {
-        for (const [id, handler] of Object.entries(command.selectMenus)) {
-            client.selectMenus.set(id, handler);
-        }
-    }
 }
 
 // ── Load all-in-one DHS ticket commands (ticketCommands.js) ──────────────────
+// NOTE: select menus from this file are merged into client.buttons so the
+// existing interactionCreate.js (which checks `buttons` for select menus too)
+// works without any changes.
 for (const cmd of ticketCommands) {
     client.commands.set(cmd.data.name, cmd);
     commandPayloads.push(cmd.data.toJSON());
@@ -73,16 +69,16 @@ for (const cmd of ticketCommands) {
         }
     }
 
+    // Merge select menu handlers into the buttons collection
     if (cmd.selectMenus) {
         for (const [id, handler] of Object.entries(cmd.selectMenus)) {
-            client.selectMenus.set(id, handler);
+            client.buttons.set(id, handler);
         }
     }
 }
 
 console.log('[DHS] Registered slash commands:', [...client.commands.keys()]);
-console.log('[DHS] Registered button handlers:', [...client.buttons.keys()]);
-console.log('[DHS] Registered select menu handlers:', [...client.selectMenus.keys()]);
+console.log('[DHS] Registered button/select handlers:', [...client.buttons.keys()]);
 
 // ── Load prefix commands ──────────────────────────────────────────────────────
 const prefixCommandFiles = readdirSync(join(__dirname, 'prefixCommands')).filter((f) => f.endsWith('.js'));
@@ -160,7 +156,7 @@ for (const file of eventFiles) {
     console.log(`[DHS] Registering event: ${event.name}`);
     const handler = (...args) => {
         if (event.name === 'interactionCreate') {
-            event.execute(...args, client.commands, client.buttons, client.modals, client.selectMenus);
+            event.execute(...args, client.commands, client.buttons, client.modals);
         } else if (event.name === 'messageCreate') {
             event.execute(...args, client.prefixCommands);
         } else {
