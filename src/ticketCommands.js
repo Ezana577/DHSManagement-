@@ -100,13 +100,22 @@ const COMMAND_DISPLAY_NAMES = {
 // via /config — per request, this applies only to panel send and panel edit.
 const LS_ONLY_EDIT_COMMANDS = new Set(['panel_send', 'panel_edit']);
 
+// FIX: panel_send / panel_edit now default to the 'ls' tier instead of 'hr'.
+// Previously the default tier let HR/SHR *use* panel send & edit even though
+// only LS+ was ever allowed to *edit* who could use them — that mismatch is
+// what made /config look "wrong" (it correctly showed HR/SHR/LS/Exec as
+// allowed by default, but in practice you only ever wanted LS+ touching the
+// panel). Now the default matches reality: only LS + Executive can run
+// /panel send and /panel edit out of the box. An LS+ member can still grant
+// HR or SHR access via /config if desired.
 const DEFAULT_COMMAND_TIER = {
     add: 'hr', remove: 'hr', rename: 'hr', claim: 'hr', unclaim: 'hr',
-    close: 'hr', closerequest: 'hr', panel_send: 'hr', panel_edit: 'hr', panel_switch: 'hr',
+    close: 'hr', closerequest: 'hr', panel_send: 'ls', panel_edit: 'ls', panel_switch: 'hr',
     blacklist: 'shr', transfer: 'shr',
 };
 
 function defaultRoleIdsForTier(tier) {
+    if (tier === 'ls')  return [process.env.ROLE_LS, process.env.ROLE_EXEC].filter(Boolean);
     if (tier === 'shr') return [process.env.ROLE_SHR, process.env.ROLE_LS, process.env.ROLE_EXEC].filter(Boolean);
     return [process.env.ROLE_HR, process.env.ROLE_SHR, process.env.ROLE_LS, process.env.ROLE_EXEC].filter(Boolean); // 'hr' tier
 }
@@ -216,11 +225,13 @@ function buildCategoryEmbed(category) {
 }
 
 // ─── Ticket action buttons (sent inside every ticket on open) ─────────────────
+// FIX: third button is now "Close with Reason" (opens a modal, then closes
+// with the typed reason) instead of "Request Close".
 function buildTicketActionRow() {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('ticket:claim').setLabel('Claim').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('ticket:close').setLabel('Close').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('ticket:closerequest').setLabel('Request Close').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('ticket:closewithreason').setLabel('Close with Reason').setStyle(ButtonStyle.Secondary),
     );
 }
 
@@ -377,25 +388,33 @@ async function executeClose(interaction, ticket, reason) {
         )
         .setFooter({ text: 'DHS | Support System' });
 
-    const editReasonRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`ticket:editreason:${ticket.id}`).setLabel('Edit Reason').setStyle(ButtonStyle.Secondary)
-    );
-
+    // FIX: previously the transcript file was attached directly to the same
+    // message as the log embed, which made Discord render the raw file block
+    // above the embed. Now we upload the transcript in its own throwaway
+    // message first (purely to obtain a CDN url), delete that message right
+    // away, then send the embed by itself with a "View Transcript" link
+    // button pointing at that url. No file is ever visibly attached to the
+    // log message.
     let transcriptUrl = null;
+    if (logChannel && transcriptAttachment) {
+        const fileMsg = await logChannel.send({ files: [transcriptAttachment] }).catch(() => null);
+        transcriptUrl = fileMsg?.attachments?.first()?.url ?? null;
+        if (fileMsg) await fileMsg.delete().catch(() => null);
+    }
+
     if (logChannel) {
-        const payload = { embeds: [logEmbed], components: [editReasonRow], allowedMentions: { parse: [] } };
-        if (transcriptAttachment) payload.files = [transcriptAttachment];
-
-        const sentLog = await logChannel.send(payload).catch(() => null);
-        transcriptUrl = sentLog?.attachments?.first()?.url ?? null;
-
-        if (sentLog && transcriptUrl) {
-            const finalRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`ticket:editreason:${ticket.id}`).setLabel('Edit Reason').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setLabel('View Transcript').setStyle(ButtonStyle.Link).setURL(transcriptUrl)
-            );
-            await sentLog.edit({ components: [finalRow] }).catch(() => null);
+        const row = [
+            new ButtonBuilder().setCustomId(`ticket:editreason:${ticket.id}`).setLabel('Edit Reason').setStyle(ButtonStyle.Secondary),
+        ];
+        if (transcriptUrl) {
+            row.push(new ButtonBuilder().setLabel('View Transcript').setStyle(ButtonStyle.Link).setURL(transcriptUrl));
         }
+
+        await logChannel.send({
+            embeds: [logEmbed],
+            components: [new ActionRowBuilder().addComponents(...row)],
+            allowedMentions: { parse: [] },
+        }).catch(() => null);
     }
 
     await supabase.from('tickets').update({
@@ -663,6 +682,23 @@ const close = {
             await executeClose(interaction, ticket, 'Closed via button.');
         },
 
+        // FIX: replaces the old "Request Close" ticket button. Opens a modal
+        // asking staff for a reason, then closes the ticket immediately with
+        // that reason once submitted.
+        'ticket:closewithreason': async (interaction) => {
+            const ticket = await getTicketByChannel(interaction.channelId);
+            if (!ticket) return interaction.reply({ content: 'Ticket data not found.', ephemeral: true });
+
+            const isOwner = ticket.owner_id === interaction.user.id;
+            if (!isOwner && !(await canUseCommand(interaction.guildId, 'close', interaction.member))) return interaction.reply({ content: 'You do not have permission to close this ticket.', ephemeral: true });
+
+            const modal = new ModalBuilder().setCustomId('ticket:closewithreason:modal').setTitle('Close Ticket With Reason');
+            modal.addComponents(new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId('reason').setLabel('Reason for closing').setStyle(TextInputStyle.Paragraph).setRequired(true)
+            ));
+            await interaction.showModal(modal);
+        },
+
         'ticket:closerequest:accept': async (interaction) => {
             const ticket = await getTicketByChannel(interaction.channelId);
             if (!ticket) return interaction.reply({ content: 'Ticket not found.', ephemeral: true });
@@ -694,6 +730,15 @@ const close = {
     },
 
     modals: {
+        'ticket:closewithreason:modal': async (interaction) => {
+            const ticket = await getTicketByChannel(interaction.channelId);
+            if (!ticket) return interaction.reply({ content: 'Ticket data not found.', ephemeral: true });
+
+            const reason = interaction.fields.getTextInputValue('reason');
+            await interaction.deferReply();
+            await executeClose(interaction, ticket, reason);
+        },
+
         'ticket:editreason:modal': async (interaction) => {
             const ticketDbId = interaction.customId.split(':')[3];
             const newReason  = interaction.fields.getTextInputValue('reason');
@@ -711,6 +756,9 @@ const close = {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  /closerequest
+//  Kept as a standalone slash command (e.g. for staff who want the
+//  accept/deny flow), it's just no longer one of the three buttons posted
+//  automatically inside every new ticket.
 // ═══════════════════════════════════════════════════════════════════════════════
 const closerequest = {
     data: new SlashCommandBuilder()
@@ -1153,12 +1201,21 @@ const config = {
             }
 
             const roleId = interaction.values[0];
+            // FIX: surface the real Supabase error instead of a generic
+            // "Failed to update configuration" with no detail — this was
+            // making add/remove look totally broken with zero clues. Common
+            // causes: the command_permissions table doesn't exist yet, the
+            // primary key / onConflict columns don't match what's in
+            // Supabase, or row-level security is blocking the service key.
             const { error } = await supabase.from('command_permissions').upsert({
                 guild_id: interaction.guildId, command_name: commandName, role_id: roleId,
                 added_by: interaction.user.id, added_at: new Date().toISOString()
             }, { onConflict: 'guild_id,command_name,role_id' });
 
-            if (error) return interaction.reply({ content: 'Failed to update configuration.', ephemeral: true });
+            if (error) {
+                console.error('[DHS Tickets] config:add upsert error:', error);
+                return interaction.reply({ content: `Failed to update configuration: ${error.message ?? 'unknown error'}`, ephemeral: true });
+            }
 
             await logAction(interaction.client, {
                 action: 'Command Config Updated', executor: interaction.user,
@@ -1184,7 +1241,10 @@ const config = {
                 .eq('command_name', commandName)
                 .eq('role_id', roleId);
 
-            if (error) return interaction.reply({ content: 'Failed to update configuration.', ephemeral: true });
+            if (error) {
+                console.error('[DHS Tickets] config:remove delete error:', error);
+                return interaction.reply({ content: `Failed to update configuration: ${error.message ?? 'unknown error'}`, ephemeral: true });
+            }
 
             await logAction(interaction.client, {
                 action: 'Command Config Updated', executor: interaction.user,
