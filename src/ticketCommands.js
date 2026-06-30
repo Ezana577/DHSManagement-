@@ -83,8 +83,7 @@ function isHR(member)   { return hasRole(member, process.env.ROLE_EXEC, process.
 //  Every gated command/button checks `canUseCommand(guildId, commandName, member)`
 //  instead of a hardcoded isHR/isSHR call. If no custom roles have been
 //  configured for a command (table empty for that guild+command), it falls
-//  back to a sensible default tier. Executives can always use every command
-//  regardless of configuration, since they sit at the top of the chain.
+//  back to a sensible default tier.
 // ═══════════════════════════════════════════════════════════════════════════════
 // Note: /panel is split into three separate config keys (panel_send, panel_edit,
 // panel_switch) rather than one lumped "panel" entry, because the edit-lock
@@ -100,14 +99,6 @@ const COMMAND_DISPLAY_NAMES = {
 // via /config — per request, this applies only to panel send and panel edit.
 const LS_ONLY_EDIT_COMMANDS = new Set(['panel_send', 'panel_edit']);
 
-// FIX: panel_send / panel_edit now default to the 'ls' tier instead of 'hr'.
-// Previously the default tier let HR/SHR *use* panel send & edit even though
-// only LS+ was ever allowed to *edit* who could use them — that mismatch is
-// what made /config look "wrong" (it correctly showed HR/SHR/LS/Exec as
-// allowed by default, but in practice you only ever wanted LS+ touching the
-// panel). Now the default matches reality: only LS + Executive can run
-// /panel send and /panel edit out of the box. An LS+ member can still grant
-// HR or SHR access via /config if desired.
 const DEFAULT_COMMAND_TIER = {
     add: 'hr', remove: 'hr', rename: 'hr', claim: 'hr', unclaim: 'hr',
     close: 'hr', closerequest: 'hr', panel_send: 'ls', panel_edit: 'ls', panel_switch: 'hr',
@@ -120,6 +111,14 @@ function defaultRoleIdsForTier(tier) {
     return [process.env.ROLE_HR, process.env.ROLE_SHR, process.env.ROLE_LS, process.env.ROLE_EXEC].filter(Boolean); // 'hr' tier
 }
 
+// Sentinel row stored alongside real role rows in `command_permissions` to mark
+// "this guild has explicitly customized this command's role list" — even after
+// every real role has been removed. Without this, removing the LAST configured
+// role made the table go empty, which fell back to the DEFAULT tier again,
+// silently un-removing whatever role you just removed (e.g. SHR kept being
+// able to use /blacklist no matter what you did in /config).
+const CONFIG_META_ROLE_ID = '__configured__';
+
 async function getCustomCommandRoles(guildId, commandName) {
     const { data, error } = await supabase
         .from('command_permissions')
@@ -131,20 +130,30 @@ async function getCustomCommandRoles(guildId, commandName) {
         console.error('[DHS Tickets] command_permissions read error:', error);
         return null;
     }
-    return data && data.length > 0 ? data.map(r => r.role_id) : null;
+    if (!data || data.length === 0) return null; // never configured for this command — use default tier
+    const hasMeta = data.some(r => r.role_id === CONFIG_META_ROLE_ID);
+    if (!hasMeta) return null; // safety guard, shouldn't normally happen
+    return data.map(r => r.role_id).filter(id => id !== CONFIG_META_ROLE_ID);
 }
 
 // Returns { roleIds, isCustom } — the roles currently allowed to use a command,
 // and whether that list came from /config (custom) or the built-in default tier.
 async function getEffectiveCommandRoles(guildId, commandName) {
     const custom = await getCustomCommandRoles(guildId, commandName);
-    if (custom) return { roleIds: custom, isCustom: true };
+    if (custom !== null) return { roleIds: custom, isCustom: true };
     const tier = DEFAULT_COMMAND_TIER[commandName] || 'hr';
     return { roleIds: defaultRoleIdsForTier(tier), isCustom: false };
 }
 
+// FIX: Executives no longer get an unconditional bypass here. Previously
+// `if (isExec(member)) return true;` meant removing Executive's role from a
+// command's custom config did nothing — Executive could still use (and
+// manage) that command regardless. Now Executive only has access through the
+// same role list everyone else uses, which by default already includes
+// ROLE_EXEC for every tier — so nothing changes for un-customized commands,
+// but a guild can now deliberately lock Executive out of a specific command
+// via /config if they choose to.
 async function canUseCommand(guildId, commandName, member) {
-    if (isExec(member)) return true;
     const { roleIds } = await getEffectiveCommandRoles(guildId, commandName);
     return roleIds.some(id => member.roles.cache.has(id));
 }
@@ -225,8 +234,6 @@ function buildCategoryEmbed(category) {
 }
 
 // ─── Ticket action buttons (sent inside every ticket on open) ─────────────────
-// FIX: third button is now "Close with Reason" (opens a modal, then closes
-// with the typed reason) instead of "Request Close".
 function buildTicketActionRow() {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('ticket:claim').setLabel('Claim').setStyle(ButtonStyle.Primary),
@@ -388,13 +395,6 @@ async function executeClose(interaction, ticket, reason) {
         )
         .setFooter({ text: 'DHS | Support System' });
 
-    // FIX: previously the transcript file was attached directly to the same
-    // message as the log embed, which made Discord render the raw file block
-    // above the embed. Now we upload the transcript in its own throwaway
-    // message first (purely to obtain a CDN url), delete that message right
-    // away, then send the embed by itself with a "View Transcript" link
-    // button pointing at that url. No file is ever visibly attached to the
-    // log message.
     let transcriptUrl = null;
     if (logChannel && transcriptAttachment) {
         const fileMsg = await logChannel.send({ files: [transcriptAttachment] }).catch(() => null);
@@ -682,9 +682,6 @@ const close = {
             await executeClose(interaction, ticket, 'Closed via button.');
         },
 
-        // FIX: replaces the old "Request Close" ticket button. Opens a modal
-        // asking staff for a reason, then closes the ticket immediately with
-        // that reason once submitted.
         'ticket:closewithreason': async (interaction) => {
             const ticket = await getTicketByChannel(interaction.channelId);
             if (!ticket) return interaction.reply({ content: 'Ticket data not found.', ephemeral: true });
@@ -756,9 +753,6 @@ const close = {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  /closerequest
-//  Kept as a standalone slash command (e.g. for staff who want the
-//  accept/deny flow), it's just no longer one of the three buttons posted
-//  automatically inside every new ticket.
 // ═══════════════════════════════════════════════════════════════════════════════
 const closerequest = {
     data: new SlashCommandBuilder()
@@ -774,6 +768,7 @@ const closerequest = {
         const reason = interaction.options.getString('reason') ?? 'No reason provided.';
 
         return interaction.reply({
+            content: `<@${ticket.owner_id}>`,
             embeds: [
                 new EmbedBuilder().setColor(0xff9900).setTitle('Close Request')
                     .setDescription(`<@${interaction.user.id}> has requested to close this ticket.\n\n**Reason:** ${reason}`)
@@ -784,7 +779,8 @@ const closerequest = {
                     new ButtonBuilder().setCustomId('ticket:closerequest:accept').setLabel('Accept & Close').setStyle(ButtonStyle.Danger),
                     new ButtonBuilder().setCustomId('ticket:closerequest:deny').setLabel('Deny & Keep Open').setStyle(ButtonStyle.Secondary)
                 )
-            ]
+            ],
+            allowedMentions: { users: [ticket.owner_id] }
         });
     },
 
@@ -795,6 +791,7 @@ const closerequest = {
             if (!(await canUseCommand(interaction.guildId, 'closerequest', interaction.member))) return interaction.reply({ content: 'You need permission to request ticket closure.', ephemeral: true });
 
             return interaction.reply({
+                content: `<@${ticket.owner_id}>`,
                 embeds: [
                     new EmbedBuilder().setColor(0xff9900).setTitle('Close Request')
                         .setDescription(`<@${interaction.user.id}> has requested to close this ticket.\n\n**Reason:** No reason provided.`)
@@ -805,7 +802,8 @@ const closerequest = {
                         new ButtonBuilder().setCustomId('ticket:closerequest:accept').setLabel('Accept & Close').setStyle(ButtonStyle.Danger),
                         new ButtonBuilder().setCustomId('ticket:closerequest:deny').setLabel('Deny & Keep Open').setStyle(ButtonStyle.Secondary)
                     )
-                ]
+                ],
+                allowedMentions: { users: [ticket.owner_id] }
             });
         }
     }
@@ -841,7 +839,10 @@ const panel = {
             return interaction.reply({ content: `You do not have permission to use \`/panel ${sub}\`.`, ephemeral: true });
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        // FIX: /panel switch is now a PUBLIC reply (visible to everyone in the
+        // ticket, including the opener) instead of ephemeral. send/edit stay
+        // ephemeral since those are admin-only setup actions in a staff channel.
+        await interaction.deferReply({ ephemeral: sub !== 'switch' });
 
         if (sub === 'send') {
             const msg = await interaction.channel.send({ embeds: [buildPanelEmbed()], components: [buildPanelDropdown()] });
@@ -1114,21 +1115,23 @@ const jump = {
 //  SHR+ only (SHR, LS, Executive) can run /config and VIEW any command's
 //  allowed roles, shown as clean @role mentions.
 //
-//  Editing (add/remove a role):
-//    - For every command EXCEPT /panel — SHR+ may add/remove roles.
-//    - For /panel specifically — only LS+ (LS, Executive) may add/remove
-//      roles. SHR/Executive-below-LS... note Executive sits above LS, so
-//      Executive can still edit. Plain SHR can view /panel's roles but the
-//      edit controls are hidden for them with an explanatory note.
+//  Editing (add/remove a role) requires BOTH:
+//    1. Meeting the editor-tier baseline — SHR+ for most commands, LS+ only
+//       for panel_send / panel_edit.
+//    2. Actually being able to USE that command right now (per the live
+//       canUseCommand check). This is what makes "if Executive/SHR is
+//       removed from being able to use a command, they also lose the
+//       ability to manage that command's config" work correctly.
 // ═══════════════════════════════════════════════════════════════════════════════
-function canEditCommandConfig(commandName, member) {
-    if (LS_ONLY_EDIT_COMMANDS.has(commandName)) return isLS(member);
-    return isSHR(member);
+async function canEditCommandConfig(guildId, commandName, member) {
+    const meetsEditorTier = LS_ONLY_EDIT_COMMANDS.has(commandName) ? isLS(member) : isSHR(member);
+    if (!meetsEditorTier) return false;
+    return canUseCommand(guildId, commandName, member);
 }
 
 async function buildConfigPayload(guild, commandName, member) {
     const { roleIds, isCustom } = await getEffectiveCommandRoles(guild.id, commandName);
-    const editPermitted = canEditCommandConfig(commandName, member);
+    const editPermitted = await canEditCommandConfig(guild.id, commandName, member);
 
     const roleLines = roleIds.length
         ? roleIds.map(id => `<@&${id}>`).join('\n')
@@ -1143,17 +1146,33 @@ async function buildConfigPayload(guild, commandName, member) {
 
     if (LS_ONLY_EDIT_COMMANDS.has(commandName) && !editPermitted) {
         embed.addFields({ name: 'Note', value: 'Only LS+ may modify permissions for this command. You can view, but not edit, this configuration.' });
+    } else if (!editPermitted) {
+        embed.addFields({ name: 'Note', value: 'You no longer have permission to use this command yourself, so you cannot manage its configuration either.' });
     }
 
     const components = [];
     if (editPermitted) {
-        components.push(new ActionRowBuilder().addComponents(
-            new RoleSelectMenuBuilder()
-                .setCustomId(`config:add:${commandName}`)
-                .setPlaceholder('Add a role with permission to use this command')
-                .setMinValues(1)
-                .setMaxValues(1)
-        ));
+        // FIX: previously used a RoleSelectMenuBuilder for "add a role", which
+        // silently failed ("This interaction failed", nothing in the console)
+        // — almost certainly because the bot's interaction router doesn't
+        // recognize the Role Select Menu component type. Switched to a
+        // StringSelectMenu listing the guild's roles instead, which uses the
+        // exact same interaction type as the working "remove a role" menu
+        // below, so it's guaranteed to route correctly.
+        const addableRoles = [...guild.roles.cache
+            .filter(r => r.id !== guild.id && !r.managed && !roleIds.includes(r.id))
+            .values()]
+            .sort((a, b) => b.position - a.position)
+            .slice(0, 25);
+
+        if (addableRoles.length > 0) {
+            components.push(new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId(`config:add:${commandName}`)
+                    .setPlaceholder('Add a role with permission to use this command')
+                    .addOptions(addableRoles.map(r => new StringSelectMenuOptionBuilder().setLabel(r.name).setValue(r.id)))
+            ));
+        }
 
         if (roleIds.length > 0) {
             const removeOptions = roleIds.slice(0, 25).map(id => {
@@ -1196,21 +1215,19 @@ const config = {
             if (!isSHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to edit command configuration.', ephemeral: true });
 
             const commandName = interaction.customId.split(':')[2];
-            if (!canEditCommandConfig(commandName, interaction.member)) {
-                return interaction.reply({ content: `Only LS+ may modify permissions for /${COMMAND_DISPLAY_NAMES[commandName] ?? commandName}.`, ephemeral: true });
+            if (!(await canEditCommandConfig(interaction.guildId, commandName, interaction.member))) {
+                return interaction.reply({ content: `You do not have permission to modify permissions for /${COMMAND_DISPLAY_NAMES[commandName] ?? commandName}.`, ephemeral: true });
             }
 
             const roleId = interaction.values[0];
-            // FIX: surface the real Supabase error instead of a generic
-            // "Failed to update configuration" with no detail — this was
-            // making add/remove look totally broken with zero clues. Common
-            // causes: the command_permissions table doesn't exist yet, the
-            // primary key / onConflict columns don't match what's in
-            // Supabase, or row-level security is blocking the service key.
-            const { error } = await supabase.from('command_permissions').upsert({
-                guild_id: interaction.guildId, command_name: commandName, role_id: roleId,
-                added_by: interaction.user.id, added_at: new Date().toISOString()
-            }, { onConflict: 'guild_id,command_name,role_id' });
+
+            // Upsert the real role grant AND the meta sentinel row together —
+            // this is what marks the command as "customized" so that removing
+            // every role later doesn't silently fall back to the defaults.
+            const { error } = await supabase.from('command_permissions').upsert([
+                { guild_id: interaction.guildId, command_name: commandName, role_id: CONFIG_META_ROLE_ID, added_by: interaction.user.id, added_at: new Date().toISOString() },
+                { guild_id: interaction.guildId, command_name: commandName, role_id: roleId, added_by: interaction.user.id, added_at: new Date().toISOString() },
+            ], { onConflict: 'guild_id,command_name,role_id' });
 
             if (error) {
                 console.error('[DHS Tickets] config:add upsert error:', error);
@@ -1219,7 +1236,7 @@ const config = {
 
             await logAction(interaction.client, {
                 action: 'Command Config Updated', executor: interaction.user,
-                extra: [{ name: 'Command', value: `/${commandName}`, inline: true }, { name: 'Role Added', value: `<@&${roleId}>`, inline: true }]
+                extra: [{ name: 'Command', value: `/${COMMAND_DISPLAY_NAMES[commandName] ?? commandName}`, inline: true }, { name: 'Role Added', value: `<@&${roleId}>`, inline: true }]
             });
 
             const payload = await buildConfigPayload(interaction.guild, commandName, interaction.member);
@@ -1230,11 +1247,16 @@ const config = {
             if (!isSHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to edit command configuration.', ephemeral: true });
 
             const commandName = interaction.customId.split(':')[2];
-            if (!canEditCommandConfig(commandName, interaction.member)) {
-                return interaction.reply({ content: `Only LS+ may modify permissions for /${COMMAND_DISPLAY_NAMES[commandName] ?? commandName}.`, ephemeral: true });
+            if (!(await canEditCommandConfig(interaction.guildId, commandName, interaction.member))) {
+                return interaction.reply({ content: `You do not have permission to modify permissions for /${COMMAND_DISPLAY_NAMES[commandName] ?? commandName}.`, ephemeral: true });
             }
 
             const roleId = interaction.values[0];
+
+            // Only the specific role row is deleted — the meta sentinel row
+            // (role_id = '__configured__') is left untouched, which is what
+            // keeps the command "locked" to the remaining custom roles even
+            // if this was the very last one.
             const { error } = await supabase.from('command_permissions')
                 .delete()
                 .eq('guild_id', interaction.guildId)
@@ -1248,7 +1270,7 @@ const config = {
 
             await logAction(interaction.client, {
                 action: 'Command Config Updated', executor: interaction.user,
-                extra: [{ name: 'Command', value: `/${commandName}`, inline: true }, { name: 'Role Removed', value: `<@&${roleId}>`, inline: true }]
+                extra: [{ name: 'Command', value: `/${COMMAND_DISPLAY_NAMES[commandName] ?? commandName}`, inline: true }, { name: 'Role Removed', value: `<@&${roleId}>`, inline: true }]
             });
 
             const payload = await buildConfigPayload(interaction.guild, commandName, interaction.member);
