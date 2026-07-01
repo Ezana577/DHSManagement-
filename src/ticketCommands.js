@@ -47,8 +47,8 @@ const CATEGORY_LABELS = {
 function hasRole(member, ...ids) { return ids.some(id => id && member.roles.cache.has(id)); }
 function isLS(member)   { return hasRole(member, process.env.ROLE_LS); }
 function isExec(member) { return hasRole(member, process.env.ROLE_LS, process.env.ROLE_EXEC); }
-function isSHR(member)  { return hasRole(member, process.env.ROLE_LS, process.env.ROLE_EXEC, process.env.ROLE_SHR, process.env.ROLE_OIG); }
-// OIG sits above HR (and now counts as SHR+ too) — OIG can use every command HR or SHR can use.
+function isSHR(member)  { return hasRole(member, process.env.ROLE_LS, process.env.ROLE_EXEC, process.env.ROLE_SHR); }
+// OIG sits above HR only — OIG can use every command HR can use, but does NOT get SHR-level overrides.
 function isOIG(member)  { return hasRole(member, process.env.ROLE_LS, process.env.ROLE_EXEC, process.env.ROLE_SHR, process.env.ROLE_OIG); }
 function isHR(member)   { return hasRole(member, process.env.ROLE_LS, process.env.ROLE_EXEC, process.env.ROLE_SHR, process.env.ROLE_OIG, process.env.ROLE_HR); }
 
