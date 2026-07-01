@@ -96,6 +96,27 @@ function buildTicketOverwrites(guild, openerId) {
     return overwrites;
 }
 
+// ─── Claim / unclaim speaking permissions ──────────────────────────────────────
+// When a ticket is claimed, HR and OIG are muted (view-only) so only the
+// claimer (and SHR+/opener) can speak. The claimer is explicitly re-allowed,
+// and the ticket opener is explicitly re-affirmed so they can NEVER lose the
+// ability to speak in their own ticket, even if the opener happens to hold
+// an HR or OIG role that's being muted here.
+async function muteUnclaimedRolesOnClaim(channel, ticket, claimerMember) {
+    if (process.env.ROLE_HR)  await channel.permissionOverwrites.edit(process.env.ROLE_HR,  { SendMessages: false }).catch(() => null);
+    if (process.env.ROLE_OIG) await channel.permissionOverwrites.edit(process.env.ROLE_OIG, { SendMessages: false }).catch(() => null);
+
+    await channel.permissionOverwrites.edit(claimerMember, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true }).catch(() => null);
+
+    // Guarantee the ticket opener can still speak, regardless of the role mute above.
+    await channel.permissionOverwrites.edit(ticket.owner_id, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true }).catch(() => null);
+}
+
+async function unmuteRolesOnUnclaim(channel) {
+    if (process.env.ROLE_HR)  await channel.permissionOverwrites.edit(process.env.ROLE_HR,  { SendMessages: true }).catch(() => null);
+    if (process.env.ROLE_OIG) await channel.permissionOverwrites.edit(process.env.ROLE_OIG, { SendMessages: true }).catch(() => null);
+}
+
 // ─── Category embeds ──────────────────────────────────────────────────────────
 function buildGeneralEmbed() {
     return new EmbedBuilder()
@@ -360,14 +381,14 @@ const add = {
 
         const existing = interaction.channel.permissionsFor(target);
         if (existing?.has(PermissionFlagsBits.ViewChannel)) {
-            return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`<@${target.id}> already has access to this ticket.`).setFooter({ text: 'DHS | Support System' })], ephemeral: true });
+            return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Add User').setDescription(`<@${target.id}> already has access to this ticket.`).setFooter({ text: 'DHS | Support System' })], ephemeral: true });
         }
 
         await interaction.channel.permissionOverwrites.create(target, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
         await logAction(interaction.client, { action: 'User Added to Ticket', executor: interaction.user, target: target.user, ticketId: ticket.ticket_id });
 
         return interaction.reply({
-            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setDescription(`<@${target.id}> has been added to this ticket.`).setFooter({ text: 'DHS | Support System' })],
+            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Add User').setDescription(`<@${target.id}> has been added to this ticket.`).setFooter({ text: 'DHS | Support System' })],
             allowedMentions: { parse: [] }
         });
     }
@@ -461,19 +482,18 @@ const claim = {
         if (!ticket) return interaction.reply({ content: 'This command can only be used inside a ticket channel.', ephemeral: true });
         if (!isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to claim tickets.', ephemeral: true });
         if (ticket.claimed_by) {
-            return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`This ticket is already claimed by <@${ticket.claimed_by}>.`).setFooter({ text: 'DHS | Support System' })], ephemeral: true });
+            return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Claim').setDescription(`This ticket is already claimed by <@${ticket.claimed_by}>.`).setFooter({ text: 'DHS | Support System' })], ephemeral: true });
         }
 
         await interaction.deferReply();
 
-        if (process.env.ROLE_HR) await interaction.channel.permissionOverwrites.edit(process.env.ROLE_HR, { SendMessages: false }).catch(() => null);
-        await interaction.channel.permissionOverwrites.edit(interaction.member, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true }).catch(() => null);
+        await muteUnclaimedRolesOnClaim(interaction.channel, ticket, interaction.member);
 
         await supabase.from('tickets').update({ claimed_by: interaction.user.id }).eq('id', ticket.id);
         await logAction(interaction.client, { action: 'Ticket Claimed', executor: interaction.user, ticketId: ticket.ticket_id });
 
         return interaction.editReply({
-            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setDescription(`<@${interaction.user.id}> has claimed this ticket.`).setFooter({ text: 'DHS | Support System' })],
+            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Claim').setDescription(`<@${interaction.user.id}> has claimed this ticket.`).setFooter({ text: 'DHS | Support System' })],
             allowedMentions: { parse: [] }
         });
     },
@@ -484,17 +504,16 @@ const claim = {
             if (!ticket) return interaction.reply({ content: 'Ticket data not found.', ephemeral: true });
             if (!isHR(interaction.member)) return interaction.reply({ content: 'You need HR+ to claim tickets.', ephemeral: true });
             if (ticket.claimed_by) {
-                return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`Already claimed by <@${ticket.claimed_by}>.`).setFooter({ text: 'DHS | Support System' })], ephemeral: true });
+                return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Claim').setDescription(`Already claimed by <@${ticket.claimed_by}>.`).setFooter({ text: 'DHS | Support System' })], ephemeral: true });
             }
 
-            if (process.env.ROLE_HR) await interaction.channel.permissionOverwrites.edit(process.env.ROLE_HR, { SendMessages: false }).catch(() => null);
-            await interaction.channel.permissionOverwrites.edit(interaction.member, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true }).catch(() => null);
+            await muteUnclaimedRolesOnClaim(interaction.channel, ticket, interaction.member);
 
             await supabase.from('tickets').update({ claimed_by: interaction.user.id }).eq('id', ticket.id);
             await logAction(interaction.client, { action: 'Ticket Claimed', executor: interaction.user, ticketId: ticket.ticket_id });
 
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setDescription(`<@${interaction.user.id}> has claimed this ticket.`).setFooter({ text: 'DHS | Support System' })],
+                embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Claim').setDescription(`<@${interaction.user.id}> has claimed this ticket.`).setFooter({ text: 'DHS | Support System' })],
                 allowedMentions: { parse: [] }
             });
         }
@@ -517,7 +536,7 @@ const unclaim = {
 
         if (ticket.claimed_by !== interaction.user.id && !isSHR(interaction.member)) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`This ticket is claimed by <@${ticket.claimed_by}>. You need SHR+ to unclaim another staff member's ticket.`).setFooter({ text: 'DHS | Support System' })],
+                embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Unclaim').setDescription(`This ticket is claimed by <@${ticket.claimed_by}>. You need SHR+ to unclaim another staff member's ticket.`).setFooter({ text: 'DHS | Support System' })],
                 ephemeral: true
             });
         }
@@ -526,10 +545,10 @@ const unclaim = {
 
         const prevClaimerId = ticket.claimed_by;
 
-        if (process.env.ROLE_HR) await interaction.channel.permissionOverwrites.edit(process.env.ROLE_HR, { SendMessages: true }).catch(() => null);
+        await unmuteRolesOnUnclaim(interaction.channel);
 
         const prevMember = await interaction.guild.members.fetch(prevClaimerId).catch(() => null);
-        if (prevMember) await interaction.channel.permissionOverwrites.delete(prevMember).catch(() => null);
+        if (prevMember && prevClaimerId !== ticket.owner_id) await interaction.channel.permissionOverwrites.delete(prevMember).catch(() => null);
 
         await supabase.from('tickets').update({ claimed_by: null }).eq('id', ticket.id);
         await logAction(interaction.client, {
@@ -725,7 +744,7 @@ const sendpanel = {
     async execute(interaction) {
         if (!isLS(interaction.member)) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription('You do not have permission to use `/sendpanel`. This requires LS+.').setFooter({ text: 'DHS | Support System' })],
+                embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Send Panel').setDescription('You do not have permission to use `/sendpanel`. This requires LS+.').setFooter({ text: 'DHS | Support System' })],
                 ephemeral: true
             });
         }
@@ -748,7 +767,7 @@ const editpanel = {
     async execute(interaction) {
         if (!isLS(interaction.member)) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription('You do not have permission to use `/editpanel`. This requires LS+.').setFooter({ text: 'DHS | Support System' })],
+                embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Edit Panel').setDescription('You do not have permission to use `/editpanel`. This requires LS+.').setFooter({ text: 'DHS | Support System' })],
                 ephemeral: true
             });
         }
@@ -780,7 +799,7 @@ const switchpanel = {
     async execute(interaction) {
         if (!isHR(interaction.member)) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription('You do not have permission to use `/switchpanel`. This requires HR+.').setFooter({ text: 'DHS | Support System' })],
+                embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Switch Panel').setDescription('You do not have permission to use `/switchpanel`. This requires HR+.').setFooter({ text: 'DHS | Support System' })],
                 ephemeral: true
             });
         }
@@ -793,7 +812,7 @@ const switchpanel = {
 
         if (ticket.category === category) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`This ticket is already set to **${CATEGORY_LABELS[category]}**.`).setFooter({ text: 'DHS | Support System' })],
+                embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Switch Panel').setDescription(`This ticket is already set to **${CATEGORY_LABELS[category]}**.`).setFooter({ text: 'DHS | Support System' })],
                 ephemeral: true
             });
         }
@@ -924,7 +943,7 @@ const remove = {
         await logAction(interaction.client, { action: 'User Removed from Ticket', executor: interaction.user, target: target.user, ticketId: ticket.ticket_id });
 
         return interaction.reply({
-            embeds: [new EmbedBuilder().setColor(0xff9900).setDescription(`<@${target.id}> has been removed from this ticket.`).setFooter({ text: 'DHS | Support System' })],
+            embeds: [new EmbedBuilder().setColor(0xff9900).setTitle('Remove User').setDescription(`<@${target.id}> has been removed from this ticket.`).setFooter({ text: 'DHS | Support System' })],
             allowedMentions: { parse: [] }
         });
     }
@@ -952,7 +971,7 @@ const rename = {
         await logAction(interaction.client, { action: 'Ticket Renamed', executor: interaction.user, ticketId: ticket.ticket_id, extra: [{ name: 'Old Name', value: oldName, inline: true }, { name: 'New Name', value: name, inline: true }] });
 
         return interaction.reply({
-            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setDescription(`Channel renamed from \`${oldName}\` to \`${name}\`.`).setFooter({ text: 'DHS | Support System' })]
+            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Rename').setDescription(`Channel renamed from \`${oldName}\` to \`${name}\`.`).setFooter({ text: 'DHS | Support System' })]
         });
     }
 };
@@ -977,7 +996,7 @@ const transfer = {
 
         if (ticket.claimed_by !== interaction.user.id && !isSHR(interaction.member)) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`This ticket is claimed by <@${ticket.claimed_by}>. You need SHR+ to transfer a ticket you didn't claim.`).setFooter({ text: 'DHS | Support System' })],
+                embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Transfer').setDescription(`This ticket is claimed by <@${ticket.claimed_by}>. You need SHR+ to transfer a ticket you didn't claim.`).setFooter({ text: 'DHS | Support System' })],
                 ephemeral: true
             });
         }
@@ -1012,7 +1031,7 @@ const transfer = {
         });
 
         return interaction.editReply({
-            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setDescription(`This ticket has been transferred from <@${oldClaimerId}> to <@${target.id}>. <@${target.id}> is now the ticket handler.`).setFooter({ text: 'DHS | Support System' })],
+            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Transfer').setDescription(`This ticket has been transferred from <@${oldClaimerId}> to <@${target.id}>. <@${target.id}> is now the ticket handler.`).setFooter({ text: 'DHS | Support System' })],
             allowedMentions: { parse: [] }
         });
     }
@@ -1030,7 +1049,7 @@ const jump = {
         const ticket = await getTicketByChannel(interaction.channelId);
         if (!ticket) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription('This command can only be used inside a ticket channel.').setFooter({ text: 'DHS | Support System' })],
+                embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Jump').setDescription('This command can only be used inside a ticket channel.').setFooter({ text: 'DHS | Support System' })],
                 ephemeral: true
             });
         }
@@ -1044,7 +1063,7 @@ const jump = {
 
         if (!originalMsg) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription('Could not find the opening message for this ticket.').setFooter({ text: 'DHS | Support System' })],
+                embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Jump').setDescription('Could not find the opening message for this ticket.').setFooter({ text: 'DHS | Support System' })],
                 ephemeral: true
             });
         }
