@@ -45,13 +45,13 @@ async function getTicketByChannel(channelId) {
 // ─── Permission overwrites for new ticket channels ────────────────────────────
 function buildTicketOverwrites(guild, openerId) {
     const overwrites = [
-        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: openerId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+        { id: guild.roles.everyone.id, deny: },
+        { id: openerId, allow: },
     ];
-    for (const roleId of [process.env.ROLE_HR, process.env.ROLE_SHR, process.env.ROLE_EXEC, process.env.ROLE_LS]) {
+    for (const roleId of) {
         if (roleId) overwrites.push({
             id: roleId,
-            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages]
+            allow:
         });
     }
     return overwrites;
@@ -161,13 +161,13 @@ async function logAction(client, opts = {}) {
     if (opts.target)   embed.addFields({ name: 'Target',   value: `<@${opts.target.id}>`,   inline: true });
     if (opts.ticketId) embed.addFields({ name: 'Ticket',   value: opts.ticketId,             inline: true });
     if (opts.reason)   embed.addFields({ name: 'Reason',   value: opts.reason });
-    if (opts.extra)    for (const f of (Array.isArray(opts.extra) ? opts.extra : [opts.extra])) embed.addFields(f);
-    await channel.send({ embeds: [embed], allowedMentions: { parse: [] } }).catch(() => null);
+    if (opts.extra)    for (const f of (Array.isArray(opts.extra) ? opts.extra :)) embed.addFields(f);
+    await channel.send({ embeds:, allowedMentions: { parse: } }).catch(() => null);
 }
 
 // ─── Transcript generator — uploads to Supabase Storage, returns public URL ───
 async function generateTranscript(ticketChannel, ticketId) {
-    const messages = [];
+    const messages =;
     let before;
     while (true) {
         const batch = await ticketChannel.messages.fetch({ limit: 100, before }).catch(() => null);
@@ -195,7 +195,7 @@ async function generateTranscript(ticketChannel, ticketId) {
             const fields = e.fields.map(f => `<div class="ef"><b>${esc(f.name)}</b><span>${esc(f.value)}</span></div>`).join('');
             return `<div class="embed" style="${color}">${title}${desc}${fields}</div>`;
         }).join('');
-        const attachments = [...m.attachments.values()].map(a =>
+        const attachments =map(a =>
             a.contentType?.startsWith('image/')
                 ? `<img src="${a.url}" class="ai"/>`
                 : `<a href="${a.url}" class="al">${esc(a.name)}</a>`
@@ -223,7 +223,7 @@ header{background:#1d72d7;padding:16px 24px}header h1{font-size:18px;font-weight
         contentType: 'text/html', upsert: true
     });
     if (error) {
-        console.error('[DHS Transcript] Upload error:', error);
+        console.error(' Upload error:', error);
         return null;
     }
     const { data: urlData } = supabase.storage.from('transcripts').getPublicUrl(key);
@@ -273,7 +273,7 @@ async function executeClose(interaction, ticket, reason) {
 
     const logChannel = guild.channels.cache.get(CLOSE_LOG_CHANNEL);
     if (logChannel) {
-        await logChannel.send({ embeds: [logEmbed], components: [logRow], allowedMentions: { parse: [] } }).catch(() => null);
+        await logChannel.send({ embeds:, components:, allowedMentions: { parse: } }).catch(() => null);
     }
 
     // ── DM ticket opener ──────────────────────────────────────────────────────
@@ -293,13 +293,13 @@ async function executeClose(interaction, ticket, reason) {
             )
             .setFooter({ text: 'DHS | Support System' });
 
-        const dmComponents = [];
+        const dmComponents =;
         if (transcriptUrl) {
             dmComponents.push(new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setLabel('View Transcript').setStyle(ButtonStyle.Link).setURL(transcriptUrl)
             ));
         }
-        await opener.send({ embeds: [dmEmbed], components: dmComponents, allowedMentions: { parse: [] } }).catch(() => null);
+        await opener.send({ embeds:, components: dmComponents, allowedMentions: { parse: } }).catch(() => null);
     }
 
     setTimeout(() => channel.delete(`Ticket closed by ${interaction.user.tag ?? interaction.user.username}`).catch(() => null), 4000);
@@ -311,7 +311,7 @@ async function executeClose(interaction, ticket, reason) {
 const add = {
     data: new SlashCommandBuilder()
         .setName('add')
-        .setDescription('Add a user to this ticket. [HR+]')
+        .setDescription('Add a user to this ticket.')
         .addUserOption(o => o.setName('user').setDescription('User to add.').setRequired(true)),
 
     async execute(interaction) {
@@ -324,15 +324,15 @@ const add = {
 
         const existing = interaction.channel.permissionsFor(target);
         if (existing?.has(PermissionFlagsBits.ViewChannel)) {
-            return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`<@${target.id}> already has access to this ticket.`).setFooter({ text: 'DHS | Support System' })], ephemeral: true });
+            return interaction.reply({ embeds:, ephemeral: true });
         }
 
         await interaction.channel.permissionOverwrites.create(target, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
         await logAction(interaction.client, { action: 'User Added to Ticket', executor: interaction.user, target: target.user, ticketId: ticket.ticket_id });
 
         return interaction.reply({
-            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setDescription(`<@${target.id}> has been added to this ticket.`).setFooter({ text: 'DHS | Support System' })],
-            allowedMentions: { parse: [] }
+            embeds:,
+            allowedMentions: { parse: }
         });
     }
 };
@@ -343,7 +343,7 @@ const add = {
 const blacklist = {
     data: new SlashCommandBuilder()
         .setName('blacklist')
-        .setDescription('Manage the ticket blacklist. [SHR+]')
+        .setDescription('Manage the ticket blacklist.')
         
         .addSubcommand(sub => sub.setName('add').setDescription('Blacklist a user or role from opening tickets.')
             .addUserOption(o => o.setName('user').setDescription('User to blacklist.').setRequired(false))
@@ -377,13 +377,13 @@ const blacklist = {
             }, { onConflict: 'guild_id,target_id' });
 
             if (error) {
-                console.error('[DHS Blacklist] Add error:', error);
+                console.error(' Add error:', error);
                 return interaction.editReply({ content: 'Failed to add to blacklist.' });
             }
 
             await logAction(interaction.client, {
                 action: 'Blacklist Add', executor: interaction.user,
-                extra: [{ name: 'Target', value: targetName ?? targetId, inline: true }, { name: 'Type', value: targetType, inline: true }, { name: 'Reason', value: reason }]
+                extra:
             });
 
             return interaction.editReply({
@@ -396,13 +396,13 @@ const blacklist = {
         if (sub === 'remove') {
             const { error } = await supabase.from('blacklists').update({ active: false }).eq('guild_id', interaction.guildId).eq('target_id', targetId);
             if (error) {
-                console.error('[DHS Blacklist] Remove error:', error);
+                console.error(' Remove error:', error);
                 return interaction.editReply({ content: 'Failed to remove from blacklist.' });
             }
 
             await logAction(interaction.client, {
                 action: 'Blacklist Remove', executor: interaction.user,
-                extra: [{ name: 'Target', value: targetName ?? targetId, inline: true }, { name: 'Type', value: targetType, inline: true }]
+                extra:
             });
 
             return interaction.editReply({
@@ -419,14 +419,14 @@ const blacklist = {
 const claim = {
     data: new SlashCommandBuilder()
         .setName('claim')
-        .setDescription('Claim this ticket as your own. [HR+]'),
+        .setDescription('Claim this ticket as your own.'),
 
     async execute(interaction) {
         const ticket = await getTicketByChannel(interaction.channelId);
         if (!ticket) return interaction.reply({ content: 'This command can only be used inside a ticket channel.', ephemeral: true });
         if (!isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to claim tickets.', ephemeral: true });
         if (ticket.claimed_by) {
-            return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`This ticket is already claimed by <@${ticket.claimed_by}>.`).setFooter({ text: 'DHS | Support System' })], ephemeral: true });
+            return interaction.reply({ embeds:, ephemeral: true });
         }
 
         await interaction.deferReply();
@@ -438,8 +438,8 @@ const claim = {
         await logAction(interaction.client, { action: 'Ticket Claimed', executor: interaction.user, ticketId: ticket.ticket_id });
 
         return interaction.editReply({
-            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setDescription(`<@${interaction.user.id}> has claimed this ticket.`).setFooter({ text: 'DHS | Support System' })],
-            allowedMentions: { parse: [] }
+            embeds:,
+            allowedMentions: { parse: }
         });
     },
 
@@ -449,7 +449,7 @@ const claim = {
             if (!ticket) return interaction.reply({ content: 'Ticket data not found.', ephemeral: true });
             if (!isHR(interaction.member)) return interaction.reply({ content: 'You need HR+ to claim tickets.', ephemeral: true });
             if (ticket.claimed_by) {
-                return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`Already claimed by <@${ticket.claimed_by}>.`).setFooter({ text: 'DHS | Support System' })], ephemeral: true });
+                return interaction.reply({ embeds:, ephemeral: true });
             }
 
             if (process.env.ROLE_HR) await interaction.channel.permissionOverwrites.edit(process.env.ROLE_HR, { SendMessages: false }).catch(() => null);
@@ -459,8 +459,8 @@ const claim = {
             await logAction(interaction.client, { action: 'Ticket Claimed', executor: interaction.user, ticketId: ticket.ticket_id });
 
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setDescription(`<@${interaction.user.id}> has claimed this ticket.`).setFooter({ text: 'DHS | Support System' })],
-                allowedMentions: { parse: [] }
+                embeds:,
+                allowedMentions: { parse: }
             });
         }
     }
@@ -472,7 +472,7 @@ const claim = {
 const unclaim = {
     data: new SlashCommandBuilder()
         .setName('unclaim')
-        .setDescription('Unclaim this ticket. [HR+ own | SHR+ any]'),
+        .setDescription('Unclaim this ticket.'),
 
     async execute(interaction) {
         const ticket = await getTicketByChannel(interaction.channelId);
@@ -482,7 +482,7 @@ const unclaim = {
 
         if (ticket.claimed_by !== interaction.user.id && !isSHR(interaction.member)) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`This ticket is claimed by <@${ticket.claimed_by}>. You need SHR+ to unclaim another staff member's ticket.`).setFooter({ text: 'DHS | Support System' })],
+                embeds:,
                 ephemeral: true
             });
         }
@@ -499,12 +499,12 @@ const unclaim = {
         await supabase.from('tickets').update({ claimed_by: null }).eq('id', ticket.id);
         await logAction(interaction.client, {
             action: 'Ticket Unclaimed', executor: interaction.user, ticketId: ticket.ticket_id,
-            extra: [{ name: 'Previously Claimed By', value: `<@${prevClaimerId}>`, inline: true }]
+            extra:
         });
 
         return interaction.editReply({
-            embeds: [new EmbedBuilder().setColor(0xff9900).setTitle('Ticket Unclaimed').setDescription('This ticket has been unclaimed. Any support member may now claim it.').setFooter({ text: 'DHS | Support System' })],
-            allowedMentions: { parse: [] }
+            embeds:,
+            allowedMentions: { parse: }
         });
     }
 };
@@ -515,7 +515,7 @@ const unclaim = {
 const close = {
     data: new SlashCommandBuilder()
         .setName('close')
-        .setDescription('Immediately close this ticket. [HR+ or ticket owner]')
+        .setDescription('Immediately close this ticket.')
         .addStringOption(o => o.setName('reason').setDescription('Reason for closing.').setRequired(false)),
 
     async execute(interaction) {
@@ -558,13 +558,13 @@ const close = {
             if (interaction.user.id !== ticket.owner_id) return interaction.reply({ content: 'Only the ticket opener can deny this close request.', ephemeral: true });
 
             await interaction.update({
-                embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Close Request Denied').setDescription('The ticket opener has chosen to keep this ticket open.').setFooter({ text: 'DHS | Support System' })],
-                components: []
+                embeds:,
+                components:
             });
         },
 
         'ticket:editreason': async (interaction) => {
-            const ticketDbId = interaction.customId.split(':')[2];
+            const ticketDbId = interaction.customId.split(':');
             const modal = new ModalBuilder().setCustomId(`ticket:editreason:modal:${ticketDbId}`).setTitle('Edit Close Reason');
             modal.addComponents(new ActionRowBuilder().addComponents(
                 new TextInputBuilder().setCustomId('reason').setLabel('New reason').setStyle(TextInputStyle.Paragraph).setRequired(true)
@@ -575,14 +575,14 @@ const close = {
 
     modals: {
         'ticket:editreason:modal': async (interaction) => {
-            const ticketDbId = interaction.customId.split(':')[3];
+            const ticketDbId = interaction.customId.split(':');
             const newReason  = interaction.fields.getTextInputValue('reason');
 
             const { error } = await supabase.from('tickets').update({ close_reason: newReason }).eq('id', ticketDbId);
             if (error) return interaction.reply({ content: 'Failed to update reason.', ephemeral: true });
 
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Reason Updated').setDescription(`Close reason updated to:\n\`${newReason}\``).setFooter({ text: 'DHS | Support System' })],
+                embeds:,
                 ephemeral: true
             });
         }
@@ -595,7 +595,7 @@ const close = {
 const closerequest = {
     data: new SlashCommandBuilder()
         .setName('closerequest')
-        .setDescription('Request that the ticket opener closes this ticket. [HR+]')
+        .setDescription('Request that the ticket opener closes this ticket.')
         .addStringOption(o => o.setName('reason').setDescription('Reason for the close request.').setRequired(false)),
 
     async execute(interaction) {
@@ -649,19 +649,19 @@ const closerequest = {
 const sendpanel = {
     data: new SlashCommandBuilder()
         .setName('sendpanel')
-        .setDescription('Send the DHS ticket panel to this channel. [LS+]'),
+        .setDescription('Send the DHS ticket panel to this channel.'),
 
     async execute(interaction) {
         if (!isLS(interaction.member)) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription('You do not have permission to use `/sendpanel`. This requires LS+.').setFooter({ text: 'DHS | Support System' })],
+                embeds:,
                 ephemeral: true
             });
         }
 
         await interaction.deferReply({ ephemeral: true });
 
-        const msg = await interaction.channel.send({ embeds: [buildPanelEmbed()], components: [buildPanelDropdown()] });
+        const msg = await interaction.channel.send({ embeds:, components: });
         await supabase.from('panels').upsert({ guild_id: interaction.guildId, channel_id: interaction.channelId, message_id: msg.id, updated_at: new Date().toISOString() }, { onConflict: 'guild_id' });
         await logAction(interaction.client, { action: 'Panel Sent', executor: interaction.user, extra: { name: 'Channel', value: `<#${interaction.channelId}>`, inline: true } });
         return interaction.editReply({ content: 'Panel sent successfully.' });
@@ -671,13 +671,13 @@ const sendpanel = {
 const editpanel = {
     data: new SlashCommandBuilder()
         .setName('editpanel')
-        .setDescription('Edit the existing DHS ticket panel in place. [LS+]')
+        .setDescription('Edit the existing DHS ticket panel in place.')
         .addStringOption(o => o.setName('message_id').setDescription('Message ID of the existing panel.').setRequired(true)),
 
     async execute(interaction) {
         if (!isLS(interaction.member)) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription('You do not have permission to use `/editpanel`. This requires LS+.').setFooter({ text: 'DHS | Support System' })],
+                embeds:,
                 ephemeral: true
             });
         }
@@ -688,7 +688,7 @@ const editpanel = {
         const msg = await interaction.channel.messages.fetch(messageId).catch(() => null);
         if (!msg) return interaction.editReply({ content: 'Could not find that message in this channel.' });
 
-        await msg.edit({ embeds: [buildPanelEmbed()], components: [buildPanelDropdown()] });
+        await msg.edit({ embeds:, components: });
         await logAction(interaction.client, { action: 'Panel Edited', executor: interaction.user, extra: { name: 'Message ID', value: messageId, inline: true } });
         return interaction.editReply({ content: 'Panel updated successfully.' });
     }
@@ -697,7 +697,7 @@ const editpanel = {
 const switchpanel = {
     data: new SlashCommandBuilder()
         .setName('switchpanel')
-        .setDescription("Switch this ticket's category. [HR+]")
+        .setDescription("Switch this ticket's category.")
         .addStringOption(o => o.setName('category').setDescription('Category to switch to.').setRequired(true)
             .addChoices(
                 { name: "❓ General Inquiry's", value: 'general' },
@@ -709,7 +709,7 @@ const switchpanel = {
     async execute(interaction) {
         if (!isHR(interaction.member)) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription('You do not have permission to use `/switchpanel`. This requires HR+.').setFooter({ text: 'DHS | Support System' })],
+                embeds:,
                 ephemeral: true
             });
         }
@@ -722,7 +722,7 @@ const switchpanel = {
 
         if (ticket.category === category) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`This ticket is already set to **${CATEGORY_LABELS[category]}**.`).setFooter({ text: 'DHS | Support System' })],
+                embeds:}**.`).setFooter({ text: 'DHS | Support System' })],
                 ephemeral: true
             });
         }
@@ -732,14 +732,14 @@ const switchpanel = {
         const recentMsgs = await interaction.channel.messages.fetch({ limit: 50 }).catch(() => null);
         const openMsg = recentMsgs?.find(m =>
             m.author?.id === interaction.client.user.id &&
-            m.embeds?.[0]?.title &&
-            Object.values(CATEGORY_TITLES).includes(m.embeds[0].title)
+            m.embeds?.?.title &&
+            Object.values(CATEGORY_TITLES).includes(m.embedstitle)
         );
         if (openMsg) {
-            await openMsg.edit({ embeds: [buildCategoryEmbed(category)] }).catch(() => null);
+            await openMsg.edit({ embeds: }).catch(() => null);
         }
 
-        const newParentId = process.env[`TICKET_CATEGORY_${category.toUpperCase()}`];
+        const newParentId = process.env;
         if (newParentId) {
             await interaction.channel.setParent(newParentId, { lockPermissions: false }).catch(() => null);
         }
@@ -750,14 +750,14 @@ const switchpanel = {
         await logAction(interaction.client, {
             action: 'Panel Switch', executor: interaction.user, ticketId: ticket.ticket_id,
             extra: [
-                { name: 'Old Category', value: CATEGORY_LABELS[oldCategory] ?? oldCategory, inline: true },
-                { name: 'New Category', value: CATEGORY_LABELS[category] ?? category, inline: true }
+                { name: 'Old Category', value: CATEGORY_LABELS ?? oldCategory, inline: true },
+                { name: 'New Category', value: CATEGORY_LABELS ?? category, inline: true }
             ]
         });
 
         return interaction.editReply({
             embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Ticket Category Switched')
-                .setDescription(`This ticket has been switched to: **${CATEGORY_LABELS[category] ?? category}**
+                .setDescription(`This ticket has been switched to: **${CATEGORY_LABELS ?? category}**
 Switched by: <@${interaction.user.id}>`)
                 .setFooter({ text: 'DHS | Support System' })]
         });
@@ -767,14 +767,14 @@ Switched by: <@${interaction.user.id}>`)
         'ticket:panel:select': async (interaction) => {
             await interaction.deferReply({ ephemeral: true });
 
-            const category = interaction.values[0];
+            const category = interaction.values;
             const guild    = interaction.guild;
             const opener   = interaction.member;
 
             const blocked = await isBlacklisted(guild.id, opener);
             if (blocked) {
                 return interaction.editReply({
-                    embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Access Denied').setDescription('You are currently blacklisted from opening tickets.').setFooter({ text: 'DHS | Support System' })]
+                    embeds:
                 });
             }
 
@@ -782,13 +782,13 @@ Switched by: <@${interaction.user.id}>`)
             if (openInCategory && openInCategory.length >= 2) {
                 const links = openInCategory.map(t => `<#${t.channel_id}>`).join(' and ');
                 return interaction.editReply({
-                    embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Ticket Limit Reached').setDescription(`You already have 2 open tickets in this category: ${links}\nClose one before opening another.`).setFooter({ text: 'DHS | Support System' })]
+                    embeds:
                 });
             }
 
             const { data: ticketNum, error: numErr } = await supabase.rpc('increment_ticket_counter', { p_guild_id: guild.id });
             if (numErr) {
-                console.error('[DHS Tickets] Counter RPC error:', numErr);
+                console.error(' Counter RPC error:', numErr);
                 return interaction.editReply({ content: 'Failed to create ticket. Please try again.' });
             }
 
@@ -798,10 +798,10 @@ Switched by: <@${interaction.user.id}>`)
             const ticketChannel = await guild.channels.create({
                 name:                 channelName,
                 type:                 ChannelType.GuildText,
-                parent:               process.env[`TICKET_CATEGORY_${category.toUpperCase()}`] || null,
+                parent:               process.env || null,
                 permissionOverwrites: buildTicketOverwrites(guild, opener.id),
                 reason:               `Ticket opened by ${opener.user.tag ?? opener.user.username}`
-            }).catch(err => { console.error('[DHS Tickets] Channel create error:', err); return null; });
+            }).catch(err => { console.error(' Channel create error:', err); return null; });
 
             if (!ticketChannel) return interaction.editReply({ content: 'Failed to create ticket channel. Check bot permissions.' });
 
@@ -813,8 +813,8 @@ Switched by: <@${interaction.user.id}>`)
             const ping   = `||<@${opener.id}>${hrId ? ` <@&${hrId}>` : ''}${shrId ? ` <@&${shrId}>` : ''}||`;
 
             await ticketChannel.send({
-                content: ping, embeds: [openEmbed], components: [buildTicketActionRow()],
-                allowedMentions: { users: [opener.id], roles: [hrId, shrId, lsId, execId].filter(Boolean) }
+                content: ping, embeds:, components:,
+                allowedMentions: { users:, roles:filter(Boolean) }
             });
 
             const { error: dbErr } = await supabase.from('tickets').insert({
@@ -822,10 +822,10 @@ Switched by: <@${interaction.user.id}>`)
                 category, status: 'open', ticket_id: ticketId, ticket_num: ticketNum,
                 claimed_by: null, opened_at: new Date().toISOString()
             });
-            if (dbErr) console.error('[DHS Tickets] Supabase insert error:', dbErr);
+            if (dbErr) console.error(' Supabase insert error:', dbErr);
 
             return interaction.editReply({
-                embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Ticket Opened').setDescription(`Opened a new ticket <#${ticketChannel.id}>`).setFooter({ text: 'DHS | Support System' })]
+                embeds:
             });
         }
     }
@@ -838,7 +838,7 @@ Switched by: <@${interaction.user.id}>`)
 const remove = {
     data: new SlashCommandBuilder()
         .setName('remove')
-        .setDescription('Remove a user from this ticket. [HR+]')
+        .setDescription('Remove a user from this ticket.')
         .addUserOption(o => o.setName('user').setDescription('User to remove.').setRequired(true)),
 
     async execute(interaction) {
@@ -854,8 +854,8 @@ const remove = {
         await logAction(interaction.client, { action: 'User Removed from Ticket', executor: interaction.user, target: target.user, ticketId: ticket.ticket_id });
 
         return interaction.reply({
-            embeds: [new EmbedBuilder().setColor(0xff9900).setDescription(`<@${target.id}> has been removed from this ticket.`).setFooter({ text: 'DHS | Support System' })],
-            allowedMentions: { parse: [] }
+            embeds:,
+            allowedMentions: { parse: }
         });
     }
 };
@@ -866,7 +866,7 @@ const remove = {
 const rename = {
     data: new SlashCommandBuilder()
         .setName('rename')
-        .setDescription('Rename this ticket channel. [HR+]')
+        .setDescription('Rename this ticket channel.')
         .addStringOption(o => o.setName('name').setDescription('New channel name.').setRequired(true)),
 
     async execute(interaction) {
@@ -874,15 +874,15 @@ const rename = {
         if (!ticket) return interaction.reply({ content: 'This command can only be used inside a ticket channel.', ephemeral: true });
         if (!isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to rename tickets.', ephemeral: true });
 
-        const name = interaction.options.getString('name').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+        const name = interaction.options.getString('name').toLowerCase().replace(/\s+/g, '-').replace(//g, '');
         if (!name) return interaction.reply({ content: 'Invalid channel name. Use letters, numbers, and hyphens only.', ephemeral: true });
 
         const oldName = interaction.channel.name;
         await interaction.channel.setName(name);
-        await logAction(interaction.client, { action: 'Ticket Renamed', executor: interaction.user, ticketId: ticket.ticket_id, extra: [{ name: 'Old Name', value: oldName, inline: true }, { name: 'New Name', value: name, inline: true }] });
+        await logAction(interaction.client, { action: 'Ticket Renamed', executor: interaction.user, ticketId: ticket.ticket_id, extra: });
 
         return interaction.reply({
-            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setDescription(`Channel renamed from \`${oldName}\` to \`${name}\`.`).setFooter({ text: 'DHS | Support System' })]
+            embeds:
         });
     }
 };
@@ -896,7 +896,7 @@ const rename = {
 const transfer = {
     data: new SlashCommandBuilder()
         .setName('transfer')
-        .setDescription('Transfer the claim/handler of this ticket to another staff member. [SHR+ any | HR own claim]')
+        .setDescription('Transfer the claim/handler of this ticket to another staff member.')
         .addUserOption(o => o.setName('user').setDescription('Staff member to transfer the claim to.').setRequired(true)),
 
     async execute(interaction) {
@@ -911,7 +911,7 @@ const transfer = {
         // HR can only transfer their OWN claimed ticket; SHR+ can transfer any
         if (ticket.claimed_by !== interaction.user.id && !isSHR(interaction.member)) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`This ticket is claimed by <@${ticket.claimed_by}>. You need SHR+ to transfer a ticket you didn't claim.`).setFooter({ text: 'DHS | Support System' })],
+                embeds:,
                 ephemeral: true
             });
         }
@@ -950,8 +950,8 @@ const transfer = {
         });
 
         return interaction.editReply({
-            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setDescription(`This ticket has been transferred from <@${oldClaimerId}> to <@${target.id}>. <@${target.id}> is now the ticket handler.`).setFooter({ text: 'DHS | Support System' })],
-            allowedMentions: { parse: [] }
+            embeds:,
+            allowedMentions: { parse: }
         });
     }
 };
@@ -968,22 +968,22 @@ const jump = {
         const ticket = await getTicketByChannel(interaction.channelId);
         if (!ticket) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription('This command can only be used inside a ticket channel.').setFooter({ text: 'DHS | Support System' })],
+                embeds:,
                 ephemeral: true
             });
         }
 
         // Find the original category embed message (first bot message with a category title)
         const messages = await interaction.channel.messages.fetch({ limit: 50 }).catch(() => null);
-        const categoryTitles = ["❓ General Inquiry's", "📄 Appeal Inquiry's", "🚨 Report Inquiry's"];
+        const categoryTitles =;
         const originalMsg = messages?.reverse().find(m =>
             m.author.id === interaction.client.user.id &&
-            m.embeds[0]?.title && categoryTitles.includes(m.embeds[0].title)
+            m.embeds?.title && categoryTitles.includes(m.embedstitle)
         );
 
         if (!originalMsg) {
             return interaction.reply({
-                embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription('Could not find the opening message for this ticket.').setFooter({ text: 'DHS | Support System' })],
+                embeds:,
                 ephemeral: true
             });
         }
@@ -991,7 +991,7 @@ const jump = {
         const jumpUrl = `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}/${originalMsg.id}`;
 
         return interaction.reply({
-            embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Jump to Ticket Start').setDescription('Click the button below to jump to the beginning of this ticket.').setFooter({ text: 'DHS | Support System' })],
+            embeds:,
             components: [
                 new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setLabel('Jump to Start').setStyle(ButtonStyle.Link).setURL(jumpUrl)
@@ -1005,4 +1005,4 @@ const jump = {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  EXPORT — array of all commands
 // ═══════════════════════════════════════════════════════════════════════════════
-export const commands = [add, blacklist, claim, unclaim, close, closerequest, sendpanel, editpanel, switchpanel, remove, rename, transfer, jump];
+export const commands =;
