@@ -47,8 +47,10 @@ const CATEGORY_LABELS = {
 function hasRole(member, ...ids) { return ids.some(id => id && member.roles.cache.has(id)); }
 function isLS(member)   { return hasRole(member, process.env.ROLE_LS); }
 function isExec(member) { return hasRole(member, process.env.ROLE_LS, process.env.ROLE_EXEC); }
-function isSHR(member)  { return hasRole(member, process.env.ROLE_LS, process.env.ROLE_EXEC, process.env.ROLE_SHR); }
-function isHR(member)   { return hasRole(member, process.env.ROLE_LS, process.env.ROLE_EXEC, process.env.ROLE_SHR, process.env.ROLE_HR); }
+function isSHR(member)  { return hasRole(member, process.env.ROLE_LS, process.env.ROLE_EXEC, process.env.ROLE_SHR, process.env.ROLE_OIG); }
+// OIG sits above HR (and now counts as SHR+ too) — OIG can use every command HR or SHR can use.
+function isOIG(member)  { return hasRole(member, process.env.ROLE_LS, process.env.ROLE_EXEC, process.env.ROLE_SHR, process.env.ROLE_OIG); }
+function isHR(member)   { return hasRole(member, process.env.ROLE_LS, process.env.ROLE_EXEC, process.env.ROLE_SHR, process.env.ROLE_OIG, process.env.ROLE_HR); }
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 async function getTicketByChannel(channelId) {
@@ -85,7 +87,7 @@ function buildTicketOverwrites(guild, openerId) {
         { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
         { id: openerId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
     ];
-    for (const roleId of [process.env.ROLE_HR, process.env.ROLE_SHR, process.env.ROLE_EXEC, process.env.ROLE_LS]) {
+    for (const roleId of [process.env.ROLE_HR, process.env.ROLE_OIG, process.env.ROLE_SHR, process.env.ROLE_EXEC, process.env.ROLE_LS]) {
         if (roleId) overwrites.push({
             id: roleId,
             allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages]
@@ -153,7 +155,7 @@ function buildTicketActionRow() {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('ticket:claim').setLabel('Claim').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('ticket:close').setLabel('Close').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('ticket:closerequest').setLabel('Request Close').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('ticket:closewithreason').setLabel('Close with Reason').setStyle(ButtonStyle.Secondary),
     );
 }
 
@@ -576,6 +578,24 @@ const close = {
             await executeClose(interaction, ticket, 'Closed via button.');
         },
 
+        'ticket:closewithreason': async (interaction) => {
+            const ticket = await getTicketByChannel(interaction.channelId);
+            if (!ticket) return interaction.reply({ content: 'Ticket data not found.', ephemeral: true });
+
+            const isOwner = ticket.owner_id === interaction.user.id;
+            if (!isOwner && !isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to close this ticket.', ephemeral: true });
+
+            const modal = new ModalBuilder().setCustomId('ticket:closewithreason:modal').setTitle('Close Ticket with Reason');
+            modal.addComponents(new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId('reason')
+                    .setLabel('Reason for closing')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setRequired(true)
+            ));
+            await interaction.showModal(modal);
+        },
+
         'ticket:closerequest:accept': async (interaction) => {
             const ticket = await getTicketByChannel(interaction.channelId);
             if (!ticket) return interaction.reply({ content: 'Ticket not found.', ephemeral: true });
@@ -607,6 +627,20 @@ const close = {
     },
 
     modals: {
+        'ticket:closewithreason:modal': async (interaction) => {
+            const ticket = await getTicketByChannel(interaction.channelId);
+            if (!ticket) return interaction.reply({ content: 'Ticket data not found.', ephemeral: true });
+            if (ticket.status === 'closed') return interaction.reply({ content: 'This ticket is already closed.', ephemeral: true });
+
+            const isOwner = ticket.owner_id === interaction.user.id;
+            if (!isOwner && !isHR(interaction.member)) return interaction.reply({ content: 'You do not have permission to close this ticket.', ephemeral: true });
+
+            const reason = interaction.fields.getTextInputValue('reason');
+
+            await interaction.deferReply();
+            await executeClose(interaction, ticket, reason);
+        },
+
         'ticket:editreason:modal': async (interaction) => {
             const ticketDbId = interaction.customId.split(':')[3];
             const newReason  = interaction.fields.getTextInputValue('reason');
@@ -843,14 +877,15 @@ const switchpanel = {
 
             const openEmbed = buildEmbedForCategory(category);
             const hrId   = process.env.ROLE_HR;
+            const oigId  = process.env.ROLE_OIG;
             const shrId  = process.env.ROLE_SHR;
             const lsId   = process.env.ROLE_LS;
             const execId = process.env.ROLE_EXEC;
-            const ping   = `||<@${opener.id}>${hrId ? ` <@&${hrId}>` : ''}${shrId ? ` <@&${shrId}>` : ''}||`;
+            const ping   = `||<@${opener.id}>${oigId ? ` <@&${oigId}>` : ''}||`;
 
             await ticketChannel.send({
                 content: ping, embeds: [openEmbed], components: [buildTicketActionRow()],
-                allowedMentions: { users: [opener.id], roles: [hrId, shrId, lsId, execId].filter(Boolean) }
+                allowedMentions: { users: [opener.id], roles: [oigId].filter(Boolean) }
             });
 
             const { error: dbErr } = await supabase.from('tickets').insert({
