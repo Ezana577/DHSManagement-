@@ -246,7 +246,6 @@ function buildTicketActionRow() {
 function buildPanelEmbed() {
     return new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle('DHS Support Center')
         .setDescription(
             `# DHS Support Center\n\n` +
             `Welcome to the Department of Homeland Security Support Center. ` +
@@ -254,9 +253,9 @@ function buildPanelEmbed() {
         )
         .addFields(
             { name: '❓ General Inquiries',  value: '> • Questions or concerns\n> • Redeem a prize\n> • General assistance',                          inline: false },
-            { name: '📄 Appeals',            value: '> • Appeal a punishment\n> • Appeal a Ticket Blacklist\n> • Request a case review',              inline: false },
+            { name: '📄 Appeals',            value: '> • Appeal a punishment\n> • Appeal a Agent Infraction\n> • Request a case review',              inline: false },
             { name: '🚨 Reports',            value: '> • Report an agent\n> • Report misconduct\n> • Submit supporting evidence',                     inline: false },
-            { name: '⚠️ Warning',            value: 'Please do not submit false, duplicate, or troll tickets. Abuse may result in a Ticket Blacklist or disciplinary action.', inline: false }
+            { name: 'Warning',            value: '-# Please do not submit false, duplicate, or troll tickets. Abuse may result in a Ticket Blacklist or disciplinary action.', inline: false }
         )
         .setImage(PANEL_BANNER)
         .setFooter({ text: 'DHS | Support System' });
