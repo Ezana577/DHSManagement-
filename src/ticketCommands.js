@@ -698,7 +698,7 @@ const editpanel = {
 const switchpanel = {
     data: new SlashCommandBuilder()
         .setName('switchpanel')
-        .setDescription("Switch this ticket's category. [HR+]")
+        .setDescription("Switch this ticket's category.")
         .addStringOption(o => o.setName('category').setDescription('Category to switch to.').setRequired(true)
             .addChoices(
                 { name: "❓ General Inquiry's", value: 'general' },
@@ -897,7 +897,7 @@ const rename = {
 const transfer = {
     data: new SlashCommandBuilder()
         .setName('transfer')
-        .setDescription('Transfer the claim/handler of this ticket to another staff member.')
+        .setDescription('Transfer the current handler of this ticket to another staff member.')
         .addUserOption(o => o.setName('user').setDescription('Staff member to transfer the claim to.').setRequired(true)),
 
     async execute(interaction) {
