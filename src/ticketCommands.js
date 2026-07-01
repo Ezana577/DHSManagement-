@@ -1,7 +1,6 @@
-// ═══════════════════════════════════════════════════════════════════════════════
 //  DHS TICKET SYSTEM — ALL COMMANDS IN ONE FILE
 //  Commands: /add /blacklist /claim /unclaim /close /closerequest
-//            /panel /remove /rename /transfer /jump
+//            /sendpanel /editpanel /switchpanel /remove /rename /transfer /jump
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import {
@@ -29,6 +28,21 @@ const PANEL_BANNER      = 'https://cdn.discordapp.com/attachments/14009478133655
 const LOG_CHANNEL_ID    = process.env.LOG_CHANNEL_ID       || '1400610140406808768';
 const CLOSE_LOG_CHANNEL = process.env.CLOSE_LOG_CHANNEL_ID || '1400610094412070934';
 
+// FIX: these were referenced in switchpanel but never defined, causing an
+// uncaught ReferenceError that silently killed the ticket:panel:select handler
+// before it could reply — resulting in the "DHS Management is thinking..."
+// hang that never resolved.
+const CATEGORY_TITLES = {
+    general: "❓ General Inquiry's",
+    appeal:  "📄 Appeal Inquiry's",
+    report:  "🚨 Report Inquiry's",
+};
+const CATEGORY_LABELS = {
+    general: "❓ General Inquiry's",
+    appeal:  "📄 Appeal Inquiry's",
+    report:  "🚨 Report Inquiry's",
+};
+
 // ─── Permissions — HR+ cascades through SHR, Executive, LS ────────────────────
 function hasRole(member, ...ids) { return ids.some(id => id && member.roles.cache.has(id)); }
 function isLS(member)   { return hasRole(member, process.env.ROLE_LS); }
@@ -40,6 +54,29 @@ function isHR(member)   { return hasRole(member, process.env.ROLE_LS, process.en
 async function getTicketByChannel(channelId) {
     const { data } = await supabase.from('tickets').select('*').eq('channel_id', channelId).single();
     return data ?? null;
+}
+
+// FIX: isBlacklisted was also removed from this version of the file but is
+// still called inside ticket:panel:select — another ReferenceError that
+// prevented tickets from opening.
+async function isBlacklisted(guildId, member) {
+    const roleIds = [...member.roles.cache.keys()];
+    const ids = [member.id, ...roleIds];
+    const orConditions = ids.map(id => `target_id.eq.${id}`).join(',');
+
+    const { data, error } = await supabase
+        .from('blacklists')
+        .select('id')
+        .eq('guild_id', guildId)
+        .eq('active', true)
+        .or(orConditions)
+        .limit(1);
+
+    if (error) {
+        console.error('[DHS Tickets] Blacklist check error:', error);
+        return false;
+    }
+    return Array.isArray(data) && data.length > 0;
 }
 
 // ─── Permission overwrites for new ticket channels ────────────────────────────
@@ -217,8 +254,6 @@ header{background:#1d72d7;padding:16px 24px}header h1{font-size:18px;font-weight
 <div class="msgs">${rows || '<p style="color:#72767d;padding:16px 0">No messages.</p>'}</div>
 <footer>Department of Homeland Security — Transcript System</footer></body></html>`;
 
-    // Upload directly to Supabase Storage — NOT sent as a Discord file attachment.
-    // This is what stops the raw .html file from appearing above the log embed.
     const key = `transcripts/${ticketId}-${Date.now()}.html`;
     const { error } = await supabase.storage.from('transcripts').upload(key, Buffer.from(html, 'utf-8'), {
         contentType: 'text/html', upsert: true
@@ -250,7 +285,6 @@ async function executeClose(interaction, ticket, reason) {
 
     await logAction(interaction.client, { action: 'Ticket Closed', executor: interaction.user, ticketId: ticket.ticket_id, reason });
 
-    // ── Closure log embed — ONLY the embed + buttons, no raw file ──────────────
     const logEmbed = new EmbedBuilder()
         .setColor(0xe74c3c)
         .setTitle('Ticket Closed')
@@ -277,7 +311,6 @@ async function executeClose(interaction, ticket, reason) {
         await logChannel.send({ embeds: [logEmbed], components: [logRow], allowedMentions: { parse: [] } }).catch(() => null);
     }
 
-    // ── DM ticket opener ──────────────────────────────────────────────────────
     const opener = await guild.members.fetch(ticket.owner_id).catch(() => null);
     if (opener) {
         const dmEmbed = new EmbedBuilder()
@@ -345,7 +378,6 @@ const blacklist = {
     data: new SlashCommandBuilder()
         .setName('blacklist')
         .setDescription('Manage the ticket blacklist.')
-        
         .addSubcommand(sub => sub.setName('add').setDescription('Blacklist a user or role from opening tickets.')
             .addUserOption(o => o.setName('user').setDescription('User to blacklist.').setRequired(false))
             .addRoleOption(o => o.setName('role').setDescription('Role to blacklist.').setRequired(false))
@@ -607,6 +639,7 @@ const closerequest = {
         const reason = interaction.options.getString('reason') ?? 'No reason provided.';
 
         return interaction.reply({
+            content: `<@${ticket.owner_id}>`,
             embeds: [
                 new EmbedBuilder().setColor(0xff9900).setTitle('Close Request')
                     .setDescription(`<@${interaction.user.id}> has requested to close this ticket.\n\n**Reason:** ${reason}`)
@@ -617,7 +650,8 @@ const closerequest = {
                     new ButtonBuilder().setCustomId('ticket:closerequest:accept').setLabel('Accept & Close').setStyle(ButtonStyle.Danger),
                     new ButtonBuilder().setCustomId('ticket:closerequest:deny').setLabel('Deny & Keep Open').setStyle(ButtonStyle.Secondary)
                 )
-            ]
+            ],
+            allowedMentions: { users: [ticket.owner_id] }
         });
     },
 
@@ -628,6 +662,7 @@ const closerequest = {
             if (!isHR(interaction.member)) return interaction.reply({ content: 'You need HR+ to request ticket closure.', ephemeral: true });
 
             return interaction.reply({
+                content: `<@${ticket.owner_id}>`,
                 embeds: [
                     new EmbedBuilder().setColor(0xff9900).setTitle('Close Request')
                         .setDescription(`<@${interaction.user.id}> has requested to close this ticket.\n\n**Reason:** No reason provided.`)
@@ -638,7 +673,8 @@ const closerequest = {
                         new ButtonBuilder().setCustomId('ticket:closerequest:accept').setLabel('Accept & Close').setStyle(ButtonStyle.Danger),
                         new ButtonBuilder().setCustomId('ticket:closerequest:deny').setLabel('Deny & Keep Open').setStyle(ButtonStyle.Secondary)
                     )
-                ]
+                ],
+                allowedMentions: { users: [ticket.owner_id] }
             });
         }
     }
@@ -737,7 +773,7 @@ const switchpanel = {
             Object.values(CATEGORY_TITLES).includes(m.embeds[0].title)
         );
         if (openMsg) {
-            await openMsg.edit({ embeds: [buildCategoryEmbed(category)] }).catch(() => null);
+            await openMsg.edit({ embeds: [buildEmbedForCategory(category)] }).catch(() => null);
         }
 
         const newParentId = process.env[`TICKET_CATEGORY_${category.toUpperCase()}`];
@@ -758,8 +794,7 @@ const switchpanel = {
 
         return interaction.editReply({
             embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Ticket Category Switched')
-                .setDescription(`This ticket has been switched to: **${CATEGORY_LABELS[category] ?? category}**
-Switched by: <@${interaction.user.id}>`)
+                .setDescription(`This ticket has been switched to: **${CATEGORY_LABELS[category] ?? category}**\nSwitched by: <@${interaction.user.id}>`)
                 .setFooter({ text: 'DHS | Support System' })]
         });
     },
@@ -806,7 +841,7 @@ Switched by: <@${interaction.user.id}>`)
 
             if (!ticketChannel) return interaction.editReply({ content: 'Failed to create ticket channel. Check bot permissions.' });
 
-            const openEmbed = buildCategoryEmbed(category);
+            const openEmbed = buildEmbedForCategory(category);
             const hrId   = process.env.ROLE_HR;
             const shrId  = process.env.ROLE_SHR;
             const lsId   = process.env.ROLE_LS;
@@ -831,7 +866,6 @@ Switched by: <@${interaction.user.id}>`)
         }
     }
 };
-
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  /remove
@@ -890,9 +924,6 @@ const rename = {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  /transfer
-//  Transfers CLAIM/HANDLER status, NOT ticket ownership (opener never changes).
-//  SHR+ can transfer any claimed ticket. HR can only transfer a ticket THEY claimed.
-//  Old claimer (if HR) loses send access; new claimer gets it.
 // ═══════════════════════════════════════════════════════════════════════════════
 const transfer = {
     data: new SlashCommandBuilder()
@@ -909,7 +940,6 @@ const transfer = {
             return interaction.reply({ content: 'This ticket is not currently claimed. Use `/claim` first.', ephemeral: true });
         }
 
-        // HR can only transfer their OWN claimed ticket; SHR+ can transfer any
         if (ticket.claimed_by !== interaction.user.id && !isSHR(interaction.member)) {
             return interaction.reply({
                 embeds: [new EmbedBuilder().setColor(0xe74c3c).setDescription(`This ticket is claimed by <@${ticket.claimed_by}>. You need SHR+ to transfer a ticket you didn't claim.`).setFooter({ text: 'DHS | Support System' })],
@@ -927,19 +957,15 @@ const transfer = {
 
         const oldClaimerId = ticket.claimed_by;
 
-        // Remove old claimer's individual send override so they fall back to the
-        // (locked) HR role permission and can no longer speak in the ticket
         const oldClaimerMember = await interaction.guild.members.fetch(oldClaimerId).catch(() => null);
         if (oldClaimerMember) {
             await interaction.channel.permissionOverwrites.delete(oldClaimerMember).catch(() => null);
         }
 
-        // Ensure HR role stays locked (in case it wasn't already)
         if (process.env.ROLE_HR) {
             await interaction.channel.permissionOverwrites.edit(process.env.ROLE_HR, { SendMessages: false }).catch(() => null);
         }
 
-        // Give new claimer explicit access
         await interaction.channel.permissionOverwrites.edit(target, {
             ViewChannel: true, SendMessages: true, ReadMessageHistory: true
         }).catch(() => null);
@@ -958,7 +984,7 @@ const transfer = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  /jump — runs INSIDE a ticket, jumps to the original opening embed of THAT ticket
+//  /jump
 // ═══════════════════════════════════════════════════════════════════════════════
 const jump = {
     data: new SlashCommandBuilder()
@@ -974,7 +1000,6 @@ const jump = {
             });
         }
 
-        // Find the original category embed message (first bot message with a category title)
         const messages = await interaction.channel.messages.fetch({ limit: 50 }).catch(() => null);
         const categoryTitles = ["❓ General Inquiry's", "📄 Appeal Inquiry's", "🚨 Report Inquiry's"];
         const originalMsg = messages?.reverse().find(m =>
