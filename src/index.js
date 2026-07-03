@@ -8,6 +8,16 @@ import { commands as ticketCommands } from './ticketCommands.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// ── HTTP keepalive server — must start FIRST so Render detects the port ───────
+const PORT = process.env.PORT || 3000;
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot is running');
+});
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`[DHS] HTTP server listening on port ${PORT}`);
+});
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -20,15 +30,15 @@ const client = new Client({
     partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
 
-client.commands = new Collection();
+client.commands     = new Collection();
 client.prefixCommands = new Collection();
-client.buttons = new Collection();
-client.modals = new Collection();
+client.buttons      = new Collection();
+client.modals       = new Collection();
 
-const originUserMap = new Map();
+const originUserMap   = new Map();
 const commandPayloads = [];
 
-// ── Load slash commands from /commands folder (existing system) ──────────────
+// ── Load slash commands from /commands folder ─────────────────────────────────
 const commandFiles = readdirSync(join(__dirname, 'commands')).filter((f) => f.endsWith('.js'));
 
 for (const file of commandFiles) {
@@ -50,9 +60,6 @@ for (const file of commandFiles) {
 }
 
 // ── Load all-in-one DHS ticket commands (ticketCommands.js) ──────────────────
-// NOTE: select menus from this file are merged into client.buttons so the
-// existing interactionCreate.js (which checks `buttons` for select menus too)
-// works without any changes.
 for (const cmd of ticketCommands) {
     client.commands.set(cmd.data.name, cmd);
     commandPayloads.push(cmd.data.toJSON());
@@ -69,7 +76,7 @@ for (const cmd of ticketCommands) {
         }
     }
 
-    // Merge select menu handlers into the buttons collection
+    // Merge select menu handlers into buttons so existing interactionCreate works
     if (cmd.selectMenus) {
         for (const [id, handler] of Object.entries(cmd.selectMenus)) {
             client.buttons.set(id, handler);
@@ -136,18 +143,7 @@ try {
     console.error('[DHS] Failed to register slash commands:', err);
 }
 
-// ── HTTP keepalive server (Render) ────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
-const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Bot is running');
-});
-
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[DHS] HTTP server listening on port ${PORT}`);
-});
-
-// ── Load events ────────────────────────────────────────────────────────────────
+// ── Load events ───────────────────────────────────────────────────────────────
 const eventFiles = readdirSync(join(__dirname, 'events')).filter((f) => f.endsWith('.js'));
 console.log('[DHS] events folder contents:', eventFiles);
 
