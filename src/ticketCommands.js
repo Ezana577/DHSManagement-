@@ -209,44 +209,51 @@ async function logAction(client, opts = {}) {
 // FIX: switched from getPublicUrl to createSignedUrl (1 year expiry).
 // getPublicUrl returns a URL that 403s unless the bucket is explicitly set to
 // Public in Supabase. createSignedUrl works on both public and private buckets.
+//
+// FIX 2: the whole function is now wrapped in try/catch, and both the upload
+// and signed-url steps log the FULL error object (not just a one-liner) so the
+// real cause (missing bucket, wrong bucket name, bad service-role permissions,
+// etc.) shows up in the Render logs instead of silently returning null and
+// causing the "View Transcript" button to disappear with no explanation.
 async function generateTranscript(ticketChannel, ticketId) {
-    const messages = [];
-    let before;
-    while (true) {
-        const batch = await ticketChannel.messages.fetch({ limit: 100, before }).catch(() => null);
-        if (!batch || batch.size === 0) break;
-        messages.push(...batch.values());
-        before = batch.last().id;
-        if (batch.size < 100) break;
-    }
-    messages.reverse();
+    try {
+        const messages = [];
+        let before;
+        while (true) {
+            const batch = await ticketChannel.messages.fetch({ limit: 100, before }).catch(() => null);
+            if (!batch || batch.size === 0) break;
+            messages.push(...batch.values());
+            before = batch.last().id;
+            if (batch.size < 100) break;
+        }
+        messages.reverse();
 
-    function esc(str) {
-        return String(str || '')
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
+        function esc(str) {
+            return String(str || '')
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
 
-    const rows = messages.map(m => {
-        const time    = new Date(m.createdTimestamp).toLocaleString('en-US', { timeZoneName: 'short' });
-        const author  = esc(m.author?.tag ?? m.author?.username ?? 'Unknown');
-        const avatar  = m.author?.displayAvatarURL({ size: 32, extension: 'png' }) ?? '';
-        const content = esc(m.content || '');
-        const embeds  = m.embeds.map(e => {
-            const color  = e.color ? `border-left:4px solid #${e.color.toString(16).padStart(6,'0')}` : 'border-left:4px solid #1d72d7';
-            const title  = e.title       ? `<div class="et">${esc(e.title)}</div>`       : '';
-            const desc   = e.description ? `<div class="ed">${esc(e.description)}</div>` : '';
-            const fields = e.fields.map(f => `<div class="ef"><b>${esc(f.name)}</b><span>${esc(f.value)}</span></div>`).join('');
-            return `<div class="embed" style="${color}">${title}${desc}${fields}</div>`;
+        const rows = messages.map(m => {
+            const time    = new Date(m.createdTimestamp).toLocaleString('en-US', { timeZoneName: 'short' });
+            const author  = esc(m.author?.tag ?? m.author?.username ?? 'Unknown');
+            const avatar  = m.author?.displayAvatarURL({ size: 32, extension: 'png' }) ?? '';
+            const content = esc(m.content || '');
+            const embeds  = m.embeds.map(e => {
+                const color  = e.color ? `border-left:4px solid #${e.color.toString(16).padStart(6,'0')}` : 'border-left:4px solid #1d72d7';
+                const title  = e.title       ? `<div class="et">${esc(e.title)}</div>`       : '';
+                const desc   = e.description ? `<div class="ed">${esc(e.description)}</div>` : '';
+                const fields = e.fields.map(f => `<div class="ef"><b>${esc(f.name)}</b><span>${esc(f.value)}</span></div>`).join('');
+                return `<div class="embed" style="${color}">${title}${desc}${fields}</div>`;
+            }).join('');
+            const attachments = [...m.attachments.values()].map(a =>
+                a.contentType?.startsWith('image/')
+                    ? `<img src="${a.url}" class="ai"/>`
+                    : `<a href="${a.url}" class="al">${esc(a.name)}</a>`
+            ).join('');
+            return `<div class="msg"><img class="av" src="${avatar}"/><div class="mb"><span class="au">${author}</span><span class="ts">${time}</span>${content ? `<div class="ct">${content}</div>` : ''}${embeds}${attachments}</div></div>`;
         }).join('');
-        const attachments = [...m.attachments.values()].map(a =>
-            a.contentType?.startsWith('image/')
-                ? `<img src="${a.url}" class="ai"/>`
-                : `<a href="${a.url}" class="al">${esc(a.name)}</a>`
-        ).join('');
-        return `<div class="msg"><img class="av" src="${avatar}"/><div class="mb"><span class="au">${author}</span><span class="ts">${time}</span>${content ? `<div class="ct">${content}</div>` : ''}${embeds}${attachments}</div></div>`;
-    }).join('');
 
-    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><title>Transcript — ${esc(ticketId)}</title>
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><title>Transcript — ${esc(ticketId)}</title>
 <style>*{box-sizing:border-box;margin:0;padding:0}body{background:#1e1f22;color:#dcddde;font-family:'Segoe UI',system-ui,sans-serif;font-size:14px}
 header{background:#1d72d7;padding:16px 24px}header h1{font-size:18px;font-weight:700;color:#fff}header p{font-size:12px;color:rgba(255,255,255,.7);margin-top:2px}
 .msgs{padding:16px 24px;display:flex;flex-direction:column;gap:12px}.msg{display:flex;gap:12px}.av{width:32px;height:32px;border-radius:50%;flex-shrink:0;background:#36393f}
@@ -259,29 +266,34 @@ header{background:#1d72d7;padding:16px 24px}header h1{font-size:18px;font-weight
 <div class="msgs">${rows || '<p style="color:#72767d;padding:16px 0">No messages.</p>'}</div>
 <footer>Department of Homeland Security — Transcript System</footer></body></html>`;
 
-    const key = `transcripts/${ticketId}-${Date.now()}.html`;
+        const key = `transcripts/${ticketId}-${Date.now()}.html`;
 
-    const { error: uploadError } = await supabase.storage
-        .from('transcripts')
-        .upload(key, Buffer.from(html, 'utf-8'), { contentType: 'text/html', upsert: true });
+        const { error: uploadError } = await supabase.storage
+            .from('transcripts')
+            .upload(key, Buffer.from(html, 'utf-8'), { contentType: 'text/html', upsert: true });
 
-    if (uploadError) {
-        console.error('[DHS Transcript] Upload error:', uploadError);
+        if (uploadError) {
+            console.error('[DHS Transcript] Upload FAILED — check that the "transcripts" bucket exists in Supabase Storage and that the service key has write access to it.');
+            console.error('[DHS Transcript] Full upload error:', JSON.stringify(uploadError, null, 2));
+            return null;
+        }
+
+        const { data: signedData, error: signedError } = await supabase.storage
+            .from('transcripts')
+            .createSignedUrl(key, 60 * 60 * 24 * 365);
+
+        if (signedError || !signedData?.signedUrl) {
+            console.error('[DHS Transcript] Signed URL FAILED. Falling back to public URL (will only work if the bucket is public).');
+            console.error('[DHS Transcript] Full signed-url error:', JSON.stringify(signedError, null, 2));
+            const { data: publicData } = supabase.storage.from('transcripts').getPublicUrl(key);
+            return publicData?.publicUrl ?? null;
+        }
+
+        return signedData.signedUrl;
+    } catch (err) {
+        console.error('[DHS Transcript] Unexpected exception while generating transcript:', err);
         return null;
     }
-
-    // Signed URL valid for 1 year — works on private and public buckets
-    const { data: signedData, error: signedError } = await supabase.storage
-        .from('transcripts')
-        .createSignedUrl(key, 60 * 60 * 24 * 365);
-
-    if (signedError || !signedData?.signedUrl) {
-        console.error('[DHS Transcript] Signed URL error:', signedError);
-        const { data: publicData } = supabase.storage.from('transcripts').getPublicUrl(key);
-        return publicData?.publicUrl ?? null;
-    }
-
-    return signedData.signedUrl;
 }
 
 // ─── Core close logic ─────────────────────────────────────────────────────────
@@ -290,6 +302,9 @@ async function executeClose(interaction, ticket, reason) {
     const guild   = interaction.guild;
 
     const transcriptUrl = await generateTranscript(channel, ticket.ticket_id);
+    if (!transcriptUrl) {
+        console.error(`[DHS Transcript] No transcript URL was produced for ticket ${ticket.ticket_id} — the "View Transcript" button will be omitted. Check the logs above for the real cause.`);
+    }
 
     const now        = new Date();
     const openedUnix = Math.floor(new Date(ticket.opened_at).getTime() / 1000);
