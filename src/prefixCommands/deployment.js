@@ -17,6 +17,7 @@ const ALLOWED_ROLE = '1426608758133358592';
 const BYPASS_ROLE = '1496312707907977387';
 const DEPLOYMENT_CHANNEL_ID = '1400947813365584025';
 const PING_ROLE_ID = '1447274909775691959';
+const PING_ROLE_ID_2 = '1519373671553040464';
 const COOLDOWN_MS = 2 * 60 * 60 * 1000;
 const BANNER_URL = 'https://media.discordapp.net/attachments/1400947813365584025/1519755229611036772/image.png';
 const DHS_EMOJI = '<:DHS:1520047343016087633>';
@@ -113,7 +114,7 @@ export async function execute(message, args) {
       new TextDisplayBuilder().setContent(`## ${DHS_EMOJI} Deployment`)
     )
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`<@&${PING_ROLE_ID}>`)
+      new TextDisplayBuilder().setContent(`<@&${PING_ROLE_ID}> <@&${PING_ROLE_ID_2}>`)
     )
     .addSeparatorComponents(
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
@@ -166,7 +167,7 @@ export async function execute(message, args) {
   const sent = await channel.send({
     components: [container],
     flags: MessageFlags.IsComponentsV2,
-    allowedMentions: { roles: [PING_ROLE_ID] },
+    allowedMentions: { roles: [PING_ROLE_ID, PING_ROLE_ID_2] },
   });
 
   await sent.react('✅');
