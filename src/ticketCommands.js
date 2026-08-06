@@ -732,54 +732,80 @@ const switchpanel = {
 
     selectMenus: {
         'ticket:panel:select': async (interaction) => {
+            console.log('[DHS Tickets] ── ticket:panel:select triggered ──');
+            console.log(`[DHS Tickets] user=${interaction.user.id} guild=${interaction.guildId} value=${interaction.values?.[0]}`);
+
             await interaction.deferReply({ ephemeral: true });
-            const category = interaction.values[0];
-            const guild    = interaction.guild;
-            const opener   = interaction.member;
 
-            const blocked = await isBlacklisted(guild.id, opener);
-            if (blocked) return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Access Denied').setDescription('You are currently blacklisted from opening tickets.').setFooter({ text: 'DHS | Support System' })] });
+            try {
+                const category = interaction.values[0];
+                const guild    = interaction.guild;
+                const opener   = interaction.member;
 
-            const { data: openInCategory } = await supabase.from('tickets').select('channel_id').eq('guild_id', guild.id).eq('owner_id', opener.id).eq('category', category).eq('status', 'open');
-            if (openInCategory && openInCategory.length >= 2) {
-                const links = openInCategory.map(t => `<#${t.channel_id}>`).join(' and ');
-                return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Ticket Limit Reached').setDescription(`You already have 2 open tickets in this category: ${links}\nClose one before opening another.`).setFooter({ text: 'DHS | Support System' })] });
+                console.log(`[DHS Tickets] Step: checking blacklist for ${opener.id}...`);
+                const blocked = await isBlacklisted(guild.id, opener);
+                console.log(`[DHS Tickets] Blacklist result: ${blocked}`);
+                if (blocked) return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Access Denied').setDescription('You are currently blacklisted from opening tickets.').setFooter({ text: 'DHS | Support System' })] });
+
+                console.log(`[DHS Tickets] Step: checking existing open tickets in category "${category}"...`);
+                const { data: openInCategory, error: openErr } = await supabase.from('tickets').select('channel_id').eq('guild_id', guild.id).eq('owner_id', opener.id).eq('category', category).eq('status', 'open');
+                if (openErr) console.error('[DHS Tickets] Open-category lookup error:', JSON.stringify(openErr, null, 2));
+                console.log(`[DHS Tickets] Open tickets in category: ${openInCategory?.length ?? 'null (query may have failed, see error above)'}`);
+                if (openInCategory && openInCategory.length >= 2) {
+                    const links = openInCategory.map(t => `<#${t.channel_id}>`).join(' and ');
+                    return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Ticket Limit Reached').setDescription(`You already have 2 open tickets in this category: ${links}\nClose one before opening another.`).setFooter({ text: 'DHS | Support System' })] });
+                }
+
+                console.log(`[DHS Tickets] Step: calling increment_ticket_counter RPC for guild ${guild.id}...`);
+                const { data: ticketNum, error: numErr } = await supabase.rpc('increment_ticket_counter', { p_guild_id: guild.id });
+                if (numErr) {
+                    console.error('[DHS Tickets] Counter RPC error (full object):', JSON.stringify(numErr, null, 2));
+                    console.error('[DHS Tickets] Counter RPC error (raw):', numErr);
+                    return interaction.editReply({ content: 'Failed to create ticket. Please try again.' });
+                }
+                console.log(`[DHS Tickets] RPC returned ticketNum=${ticketNum}`);
+
+                const ticketId    = `ticket-${ticketNum}`;
+                const channelName = `ticket-${ticketNum}`;
+
+                console.log(`[DHS Tickets] Step: creating channel "${channelName}"...`);
+                const ticketChannel = await guild.channels.create({
+                    name: channelName, type: ChannelType.GuildText,
+                    parent: process.env[`TICKET_CATEGORY_${category.toUpperCase()}`] || null,
+                    permissionOverwrites: buildTicketOverwrites(guild, opener.id),
+                    reason: `Ticket opened by ${opener.user.tag ?? opener.user.username}`
+                }).catch(err => { console.error('[DHS Tickets] Channel create error:', err); return null; });
+
+                if (!ticketChannel) return interaction.editReply({ content: 'Failed to create ticket channel. Check bot permissions.' });
+                console.log(`[DHS Tickets] Channel created: ${ticketChannel.id}`);
+
+                const oigId  = process.env.ROLE_OIG;
+                const shrId  = process.env.ROLE_SHR;
+                const lsId   = process.env.ROLE_LS;
+                const execId = process.env.ROLE_EXEC;
+                const ping   = `||<@${opener.id}>${oigId ? ` <@&${oigId}>` : ''}||`;
+
+                console.log('[DHS Tickets] Step: sending opener message...');
+                await ticketChannel.send({
+                    content: ping, embeds: [buildEmbedForCategory(category)], components: [buildTicketActionRow()],
+                    allowedMentions: { users: [opener.id], roles: [oigId].filter(Boolean) }
+                });
+
+                console.log('[DHS Tickets] Step: inserting ticket row into Supabase...');
+                const { error: dbErr } = await supabase.from('tickets').insert({
+                    guild_id: guild.id, channel_id: ticketChannel.id, owner_id: opener.id,
+                    category, status: 'open', ticket_id: ticketId, ticket_num: ticketNum,
+                    claimed_by: null, opened_at: new Date().toISOString()
+                });
+                if (dbErr) console.error('[DHS Tickets] Supabase insert error (full object):', JSON.stringify(dbErr, null, 2));
+                else console.log(`[DHS Tickets] Ticket row inserted: ${ticketId}`);
+
+                console.log('[DHS Tickets] ── ticket:panel:select complete ──');
+                return interaction.editReply({ embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Ticket Opened').setDescription(`Opened a new ticket <#${ticketChannel.id}>`).setFooter({ text: 'DHS | Support System' })] });
+            } catch (err) {
+                console.error('[DHS Tickets] UNCAUGHT error in ticket:panel:select:', err);
+                return interaction.editReply({ content: 'Failed to create ticket due to an unexpected error. Please try again or contact staff.' }).catch(() => null);
             }
-
-            const { data: ticketNum, error: numErr } = await supabase.rpc('increment_ticket_counter', { p_guild_id: guild.id });
-            if (numErr) { console.error('[DHS Tickets] Counter RPC error:', numErr); return interaction.editReply({ content: 'Failed to create ticket. Please try again.' }); }
-
-            const ticketId    = `ticket-${ticketNum}`;
-            const channelName = `ticket-${ticketNum}`;
-
-            const ticketChannel = await guild.channels.create({
-                name: channelName, type: ChannelType.GuildText,
-                parent: process.env[`TICKET_CATEGORY_${category.toUpperCase()}`] || null,
-                permissionOverwrites: buildTicketOverwrites(guild, opener.id),
-                reason: `Ticket opened by ${opener.user.tag ?? opener.user.username}`
-            }).catch(err => { console.error('[DHS Tickets] Channel create error:', err); return null; });
-
-            if (!ticketChannel) return interaction.editReply({ content: 'Failed to create ticket channel. Check bot permissions.' });
-
-            const oigId  = process.env.ROLE_OIG;
-            const shrId  = process.env.ROLE_SHR;
-            const lsId   = process.env.ROLE_LS;
-            const execId = process.env.ROLE_EXEC;
-            const ping   = `||<@${opener.id}>${oigId ? ` <@&${oigId}>` : ''}||`;
-
-            await ticketChannel.send({
-                content: ping, embeds: [buildEmbedForCategory(category)], components: [buildTicketActionRow()],
-                allowedMentions: { users: [opener.id], roles: [oigId].filter(Boolean) }
-            });
-
-            const { error: dbErr } = await supabase.from('tickets').insert({
-                guild_id: guild.id, channel_id: ticketChannel.id, owner_id: opener.id,
-                category, status: 'open', ticket_id: ticketId, ticket_num: ticketNum,
-                claimed_by: null, opened_at: new Date().toISOString()
-            });
-            if (dbErr) console.error('[DHS Tickets] Supabase insert error:', dbErr);
-
-            return interaction.editReply({ embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle('Ticket Opened').setDescription(`Opened a new ticket <#${ticketChannel.id}>`).setFooter({ text: 'DHS | Support System' })] });
         }
     }
 };
