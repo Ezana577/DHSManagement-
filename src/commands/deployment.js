@@ -27,6 +27,7 @@ const DEPLOYMENT_CHANNEL_ID = '1400527251748946031';
 const LOG_CHANNEL_ID = '1441817740791910551';
 const PING_ROLE_ID = '1447274909775691959';
 const PING_ROLE_ID_2 = '1519373671553040464';
+const PING_ROLE_ID_3 = '1527515290420904036';
 const COOLDOWN_MS = 2 * 60 * 60 * 1000;
 const BANNER_URL = 'https://media.discordapp.net/attachments/1400947813365584025/1519755229611036772/image.png';
 const DHS_EMOJI = '<:DHS:1520047343016087633>';
@@ -53,6 +54,10 @@ const IMPORTANT = [
 ].join('\n');
 
 const cooldowns = new Map();
+
+function hasDeploymentAccess(member) {
+  return member.roles.cache.has(ALLOWED_ROLE);
+}
 
 // ── Formatting helpers ──────────────────────────────────────────────────────
 
@@ -88,7 +93,7 @@ function buildActiveContainer(hostId, cohostId, note, startTs) {
       new TextDisplayBuilder().setContent(`## ${DHS_EMOJI} Deployment`)
     )
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`<@&${PING_ROLE_ID}> <@&${PING_ROLE_ID_2}>`)
+      new TextDisplayBuilder().setContent(`<@&${PING_ROLE_ID}> <@&${PING_ROLE_ID_2}> <@&${PING_ROLE_ID_3}>`)
     )
     .addSeparatorComponents(
       new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
@@ -419,16 +424,19 @@ async function executeStart(interaction) {
   const sent = await channel.send({
     components: [container],
     flags: MessageFlags.IsComponentsV2,
-    allowedMentions: { roles: [PING_ROLE_ID, PING_ROLE_ID_2] },
+    allowedMentions: { roles: [PING_ROLE_ID, PING_ROLE_ID_2, PING_ROLE_ID_3] },
   });
 
   await sent.react('✅');
 
   const messageLink = `https://discord.com/channels/${interaction.guild.id}/${channel.id}/${sent.id}`;
 
+  console.log(`[DHS Deployment] Deployment message sent: message_id=${sent.id} host=${hostId} cohost=${cohostId}`);
+
   try {
     const deploymentId = await nextDeploymentId(interaction.guild.id);
-    await insertDeployment({
+    console.log(`[DHS Deployment] Generated deployment_id=${deploymentId}, inserting row now...`);
+    const inserted = await insertDeployment({
       deployment_id: deploymentId,
       guild_id: interaction.guild.id,
       host_id: hostId,
@@ -440,8 +448,11 @@ async function executeStart(interaction) {
       status: 'Active',
       attendees: [],
     });
+    console.log(`[DHS Deployment] Insert confirmed: db_id=${inserted?.id} deployment_id=${inserted?.deployment_id}`);
   } catch (err) {
-    console.error('[DHS Deployment] Failed to save deployment to Supabase:', err);
+    console.error('[DHS Deployment] FAILED to save deployment to Supabase. This deployment will NOT show up in /deployment status or /deployment history.');
+    console.error('[DHS Deployment] Error detail:', JSON.stringify(err, null, 2));
+    console.error('[DHS Deployment] Raw error:', err);
   }
 
   await interaction.reply({ content: `Deployment started in ${channel}.`, flags: MessageFlags.Ephemeral });
@@ -450,6 +461,11 @@ async function executeStart(interaction) {
 // ── /deployment status ──────────────────────────────────────────────────────
 
 async function executeStatus(interaction) {
+  if (!hasDeploymentAccess(interaction.member)) {
+    await interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+
   await interaction.deferReply();
 
   const target = interaction.options.getUser('user') ?? interaction.user;
@@ -470,6 +486,11 @@ async function executeStatus(interaction) {
 // ── /deployment history ─────────────────────────────────────────────────────
 
 async function executeHistory(interaction) {
+  if (!hasDeploymentAccess(interaction.member)) {
+    await interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+
   await interaction.deferReply();
 
   const target = interaction.options.getUser('user') ?? interaction.user;
@@ -552,15 +573,24 @@ export const buttons = {
       flags: MessageFlags.IsComponentsV2,
     });
 
+    console.log(`[DHS Deployment] Deployment ending: message_id=${message.id} attendees=${attendeeIds.length} duration=${endTs - startTs}s`);
+
     try {
-      await updateDeploymentByMessageId(message.id, {
+      const updated = await updateDeploymentByMessageId(message.id, {
         end_time: new Date(endTs * 1000).toISOString(),
         duration: endTs - startTs,
         attendees: attendeeIds,
         status: 'Completed',
       });
+      if (!updated) {
+        console.error(`[DHS Deployment] No deployment row found for message_id=${message.id}. This means the original /deployment start insert never made it into Supabase, so there is nothing to update. Check the logs from when this deployment was started.`);
+      } else {
+        console.log(`[DHS Deployment] Update confirmed: deployment_id=${updated.deployment_id} status=${updated.status}`);
+      }
     } catch (err) {
-      console.error('[DHS Deployment] Failed to update deployment in Supabase:', err);
+      console.error('[DHS Deployment] FAILED to update deployment in Supabase:');
+      console.error('[DHS Deployment] Error detail:', JSON.stringify(err, null, 2));
+      console.error('[DHS Deployment] Raw error:', err);
     }
 
     const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
@@ -623,6 +653,11 @@ export const buttons = {
   },
 
   deployment_history_open: async (interaction) => {
+    if (!hasDeploymentAccess(interaction.member)) {
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
     const targetId = interaction.customId.split(':')[1];
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
@@ -636,6 +671,11 @@ export const buttons = {
   },
 
   deployment_history_page: async (interaction) => {
+    if (!hasDeploymentAccess(interaction.member)) {
+      await interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
     const parts = interaction.customId.split(':');
     const targetId = parts[1];
     const page = Math.max(0, parseInt(parts[2], 10) || 0);
